@@ -228,12 +228,13 @@ hfin stats --period 2026-01-01..2026-06-30
 hfin stats --period this-year --where 'tag:project=italy'
 ```
 
-Output is JSON grouped by currency and category:
+Output is JSON grouped by currency and category using the same cash-flow sign convention as visualization: normal income credits are positive, normal expense debits are negative, contra postings use the opposite sign, and `net = income + expense`.
 
 - transaction count
+- explicit `sign_convention` metadata
 - total income
-- total expense
-- net income minus expense
+- signed total expense
+- net cash flow
 - income categories
 - expense categories
 
@@ -241,7 +242,7 @@ Never silently combine currencies. Report each commodity independently unless th
 
 ## Visualize analysis as an image
 
-Generate a 1800×1200 PNG dashboard with a white background and restrained Japanese palette (藍鼠、櫻色、抹茶、金茶). It includes income/expense/net summary cards, monthly income-expense bars, expense composition, cumulative net, and category ranking.
+Generate a 1800×1200 PNG dashboard with a white background and restrained Japanese palette (藍鼠、櫻色、抹茶、金茶). Mixed reports include income/expense/net summary cards, signed monthly bars, expense composition, cumulative net, and category ranking. Expense-only and income-only reports adapt their cards, trends, composition, cumulative chart, and ranking instead of showing irrelevant empty sections.
 
 ```bash
 # Current month, default output under ~/finance/reports/
@@ -262,10 +263,13 @@ Supported filters: `--period`, `--begin`, `--end`, repeated `--account`, `--desc
 Rules:
 
 1. If the matching data contains multiple currencies, generate separate images per currency or ask which currency; never add currencies together.
-2. Use the default white-background Japanese visual system unless the user explicitly requests another style.
-3. After rendering, inspect that the PNG exists and is non-empty.
-4. Deliver the image in the response using the exact media marker `[[image: /absolute/path/to/file.png]]`; a plain filesystem path or Markdown image is insufficient.
-5. Generated reports are analysis artifacts and should not be committed with the journal.
+2. Visualization uses cash-flow signs: normal income credits are positive, normal expense debits are negative, income reversals and expense refunds use the opposite sign, and net is `income + expense`. Raw hledger postings retain their accounting signs; only the statistics/visualization projection changes them.
+3. If filtered data contains only expenses, do not show income cards, series, composition, or rankings. Apply the symmetric rule to income-only data.
+4. Prefer a full pie composition for a single matched expense; use a donut composition for larger sets.
+5. Use the default white-background Japanese visual system unless the user explicitly requests another style.
+6. After rendering, inspect that the PNG exists and is non-empty.
+7. Deliver the image in the response using the exact media marker `[[image: /absolute/path/to/file.png]]`; a plain filesystem path or Markdown image is insufficient.
+8. Generated reports are analysis artifacts and should not be committed with the journal.
 
 ### Reusable 50-scenario QA template
 

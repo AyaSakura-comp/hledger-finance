@@ -21,6 +21,8 @@ from scripts.finance import (  # noqa: E402
     _acquire_journal_lock,
     _append_validated_and_commit,
     _axis_number,
+    _composition_entries,
+    _dashboard_presentation,
     _require_regular_journal,
     _chart_amount,
     _ellipsize,
@@ -158,10 +160,19 @@ class StatsTests(unittest.TestCase):
             },
         ]
         result = compute_stats(transactions)
+        self.assertEqual(
+            result["sign_convention"],
+            {
+                "basis": "cashflow",
+                "income": "credit_positive_debit_negative",
+                "expense": "debit_negative_credit_positive",
+                "net": "income_plus_expense",
+            },
+        )
         self.assertEqual(result["currencies"]["TWD"]["income"], "50000")
-        self.assertEqual(result["currencies"]["TWD"]["expense"], "150")
+        self.assertEqual(result["currencies"]["TWD"]["expense"], "-150")
         self.assertEqual(result["currencies"]["TWD"]["net"], "49850")
-        self.assertEqual(result["expense_categories"]["expenses:food"]["TWD"], "150")
+        self.assertEqual(result["expense_categories"]["expenses:food"]["TWD"], "-150")
 
 
 class ClassificationTests(unittest.TestCase):
@@ -292,11 +303,93 @@ class VisualizationTests(unittest.TestCase):
     def test_visualization_data_aggregates_months_categories_and_cumulative_net(self):
         data = build_visualization_data(self.transactions, currency="TWD")
         self.assertEqual(data["currency"], "TWD")
-        self.assertEqual(data["totals"], {"income": Decimal("50000"), "expense": Decimal("1350"), "net": Decimal("48650")})
-        self.assertEqual(data["months"]["2026-01"], {"income": Decimal("50000"), "expense": Decimal("150")})
-        self.assertEqual(data["months"]["2026-02"], {"income": Decimal("0"), "expense": Decimal("1200")})
-        self.assertEqual(data["expense_categories"]["expenses:transport"], Decimal("1200"))
+        self.assertEqual(data["flow_mode"], "mixed")
+        self.assertEqual(
+            data["sign_convention"],
+            {
+                "basis": "cashflow",
+                "income": "credit_positive_debit_negative",
+                "expense": "debit_negative_credit_positive",
+                "net": "income_plus_expense",
+            },
+        )
+        self.assertEqual(data["totals"], {"income": Decimal("50000"), "expense": Decimal("-1350"), "net": Decimal("48650")})
+        self.assertEqual(data["months"]["2026-01"], {"income": Decimal("50000"), "expense": Decimal("-150")})
+        self.assertEqual(data["months"]["2026-02"], {"income": Decimal("0"), "expense": Decimal("-1200")})
+        self.assertEqual(data["expense_categories"]["expenses:transport"], Decimal("-1200"))
         self.assertEqual(data["cumulative_net"][-1], ("2026-02-01", Decimal("48650")))
+
+    def test_expense_only_data_and_presentation_hide_income(self):
+        data = build_visualization_data(self.transactions[1:], currency="TWD")
+        self.assertEqual(data["flow_mode"], "expense")
+        self.assertEqual(data["totals"], {"income": Decimal("0"), "expense": Decimal("-1350"), "net": Decimal("-1350")})
+        presentation = _dashboard_presentation(data)
+        self.assertEqual([card[0] for card in presentation["cards"]], ["支出"])
+        self.assertEqual([series[0] for series in presentation["month_series"]], ["expense"])
+        self.assertEqual(presentation["composition_kind"], "expense")
+        self.assertEqual(presentation["account_prefix"], "expenses:")
+        self.assertNotIn("收入", str(presentation))
+
+    def test_income_only_data_and_presentation_hide_expense(self):
+        data = build_visualization_data(self.transactions[:1], currency="TWD")
+        self.assertEqual(data["flow_mode"], "income")
+        self.assertEqual(data["totals"], {"income": Decimal("50000"), "expense": Decimal("0"), "net": Decimal("50000")})
+        presentation = _dashboard_presentation(data)
+        self.assertEqual([card[0] for card in presentation["cards"]], ["收入"])
+        self.assertEqual([series[0] for series in presentation["month_series"]], ["income"])
+        self.assertEqual(presentation["composition_kind"], "income")
+        self.assertEqual(presentation["account_prefix"], "income:")
+        self.assertNotIn("支出", str(presentation))
+
+    def test_expense_refund_and_income_reversal_keep_signed_contra_categories_visible(self):
+        transactions = [
+            {
+                "tdate": "2026-03-01",
+                "tdescription": "Expense refund",
+                "tpostings": [
+                    {"paccount": "expenses:food", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": -300}}]},
+                    {"paccount": "assets:cash", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": 300}}]},
+                ],
+            },
+            {
+                "tdate": "2026-03-02",
+                "tdescription": "Income reversal",
+                "tpostings": [
+                    {"paccount": "income:bonus", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": 100}}]},
+                    {"paccount": "assets:cash", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": -100}}]},
+                ],
+            },
+        ]
+        refund_data = build_visualization_data(transactions[:1], currency="TWD")
+        self.assertEqual(refund_data["totals"]["expense"], Decimal("300"))
+        refund_entries = _composition_entries(refund_data, _dashboard_presentation(refund_data))
+        self.assertEqual(refund_entries, [("expenses:food", Decimal("300"), Decimal("300"))])
+
+        reversal_data = build_visualization_data(transactions[1:], currency="TWD")
+        self.assertEqual(reversal_data["totals"]["income"], Decimal("-100"))
+        reversal_entries = _composition_entries(reversal_data, _dashboard_presentation(reversal_data))
+        self.assertEqual(reversal_entries, [("income:bonus", Decimal("100"), Decimal("-100"))])
+
+    def test_income_and_expense_only_dashboards_both_render(self):
+        from PIL import Image
+
+        for name, transactions in (("income", self.transactions[:1]), ("expense", self.transactions[1:2])):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                data = build_visualization_data(transactions, currency="TWD")
+                output = Path(tmp) / f"{name}.png"
+                render_dashboard_png(data, output)
+                with Image.open(output) as image:
+                    image.load()
+                    self.assertEqual(image.size, (1800, 1200))
+                    colors = image.convert("RGB").getcolors(maxcolors=10_000_000)
+                    self.assertIsNotNone(colors)
+                    self.assertGreater(len(colors), 20)
+
+    def test_single_expense_prefers_a_pie_composition(self):
+        data = build_visualization_data(self.transactions[1:2], currency="TWD")
+        presentation = _dashboard_presentation(data)
+        self.assertEqual(presentation["composition_style"], "pie")
+        self.assertEqual(presentation["composition_title"], "支出組成")
 
     def test_visualization_requires_currency_when_multiple_are_present(self):
         mixed = list(self.transactions)

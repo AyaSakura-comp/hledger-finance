@@ -106,6 +106,12 @@ Automatic classification uses this precedence:
 
 Generic `add` requires either an explicit debit account or `--debit auto`, preventing omitted accounts on income, refunds, and transfers from being silently recorded as expenses.
 
+## Signed adaptive visualization
+
+Statistics and dashboards use a cash-flow projection: normal income credits are positive, normal expense debits are negative, contra postings use the opposite sign, and net is their sum. Raw hledger postings keep their accounting signs.
+
+Expense-only and income-only dashboards hide the unrelated flow type. A single matched transaction uses a full pie composition; larger sets use a donut chart.
+
 ## Development
 
 Run the complete test suite:

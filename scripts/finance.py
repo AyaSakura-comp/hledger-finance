@@ -450,8 +450,9 @@ def compute_stats(transactions: Sequence[dict]) -> dict:
                     incomes[currency] += reported
                     income_categories[account][currency] += reported
                 elif account == "expenses" or account.startswith("expenses:"):
-                    expenses[currency] += value
-                    expense_categories[account][currency] += value
+                    reported = -value
+                    expenses[currency] += reported
+                    expense_categories[account][currency] += reported
     currencies = {}
     for currency in sorted(set(incomes) | set(expenses)):
         income = incomes[currency]
@@ -459,7 +460,7 @@ def compute_stats(transactions: Sequence[dict]) -> dict:
         currencies[currency] = {
             "income": _decimal_text(income),
             "expense": _decimal_text(expense),
-            "net": _decimal_text(income - expense),
+            "net": _decimal_text(income + expense),
         }
 
     def serialize_categories(values: dict[str, dict[str, Decimal]]) -> dict:
@@ -470,6 +471,12 @@ def compute_stats(transactions: Sequence[dict]) -> dict:
 
     return {
         "transaction_count": transaction_count,
+        "sign_convention": {
+            "basis": "cashflow",
+            "income": "credit_positive_debit_negative",
+            "expense": "debit_negative_credit_positive",
+            "net": "income_plus_expense",
+        },
         "currencies": currencies,
         "income_categories": serialize_categories(income_categories),
         "expense_categories": serialize_categories(expense_categories),
@@ -503,6 +510,7 @@ def build_visualization_data(transactions: Sequence[dict], currency: str | None 
     expense_categories: defaultdict[str, Decimal] = defaultdict(Decimal)
     income_categories: defaultdict[str, Decimal] = defaultdict(Decimal)
     daily_net: defaultdict[str, Decimal] = defaultdict(Decimal)
+    present_kinds: set[str] = set()
     matched_transactions = 0
     for transaction in transactions:
         txn_date = str(transaction.get("tdate", ""))
@@ -518,21 +526,30 @@ def build_visualization_data(transactions: Sequence[dict], currency: str | None 
                     continue
                 value = _amount_decimal(amount)
                 if account == "income" or account.startswith("income:"):
-                    reported = -value
-                    months[month]["income"] += reported
-                    income_categories[account] += reported
-                    daily_net[txn_date] += reported
+                    flow = -value
+                    months[month]["income"] += flow
+                    income_categories[account] += flow
+                    daily_net[txn_date] += flow
+                    present_kinds.add("income")
                     matched = True
                 elif account == "expenses" or account.startswith("expenses:"):
-                    months[month]["expense"] += value
-                    expense_categories[account] += value
-                    daily_net[txn_date] -= value
+                    flow = -value
+                    months[month]["expense"] += flow
+                    expense_categories[account] += flow
+                    daily_net[txn_date] += flow
+                    present_kinds.add("expense")
                     matched = True
         if matched:
             matched_transactions += 1
 
     total_income = sum((values["income"] for values in months.values()), Decimal("0"))
     total_expense = sum((values["expense"] for values in months.values()), Decimal("0"))
+    if present_kinds == {"income"}:
+        flow_mode = "income"
+    elif present_kinds == {"expense"}:
+        flow_mode = "expense"
+    else:
+        flow_mode = "mixed"
     running = Decimal("0")
     cumulative_net: list[tuple[str, Decimal]] = []
     for txn_date, value in sorted(daily_net.items()):
@@ -541,10 +558,17 @@ def build_visualization_data(transactions: Sequence[dict], currency: str | None 
     return {
         "currency": currency,
         "transaction_count": matched_transactions,
+        "flow_mode": flow_mode,
+        "sign_convention": {
+            "basis": "cashflow",
+            "income": "credit_positive_debit_negative",
+            "expense": "debit_negative_credit_positive",
+            "net": "income_plus_expense",
+        },
         "totals": {
             "income": total_income,
             "expense": total_expense,
-            "net": total_income - total_expense,
+            "net": total_income + total_expense,
         },
         "months": dict(sorted(months.items())),
         "income_categories": dict(sorted(income_categories.items())),
@@ -577,6 +601,71 @@ def _ellipsize(value: str, max_characters: int) -> str:
     if len(value) <= max_characters:
         return value
     return value[: max_characters - 1].rstrip() + "…"
+
+
+def _dashboard_presentation(data: dict) -> dict:
+    """Choose only the visual elements relevant to the available cash-flow kinds."""
+    mode = data.get("flow_mode", "mixed")
+    if mode == "expense":
+        return {
+            "mode": mode,
+            "cards": [("支出", "expense", "sakura", "pink_wash")],
+            "month_series": [("expense", "支出", "sakura")],
+            "month_title": "月度支出趨勢",
+            "composition_kind": "expense",
+            "account_prefix": "expenses:",
+            "composition_colors": ["sakura", "indigo", "gold", "matcha"],
+            "composition_title": "支出組成",
+            "composition_style": "pie" if data.get("transaction_count") == 1 else "donut",
+            "cumulative_title": "累積支出",
+            "ranking_title": "支出分類排行",
+        }
+    if mode == "income":
+        return {
+            "mode": mode,
+            "cards": [("收入", "income", "matcha", "green_wash")],
+            "month_series": [("income", "收入", "matcha")],
+            "month_title": "月度收入趨勢",
+            "composition_kind": "income",
+            "account_prefix": "income:",
+            "composition_colors": ["matcha", "indigo", "gold", "sakura"],
+            "composition_title": "收入組成",
+            "composition_style": "pie" if data.get("transaction_count") == 1 else "donut",
+            "cumulative_title": "累積收入",
+            "ranking_title": "收入分類排行",
+        }
+    return {
+        "mode": "mixed",
+        "cards": [
+            ("收入", "income", "matcha", "green_wash"),
+            ("支出", "expense", "sakura", "pink_wash"),
+            ("淨額", "net", "indigo", "blue_wash"),
+        ],
+        "month_series": [
+            ("income", "收入", "matcha"),
+            ("expense", "支出", "sakura"),
+        ],
+        "month_title": "月度收支趨勢",
+        "composition_kind": "expense",
+        "account_prefix": "expenses:",
+        "composition_colors": ["sakura", "indigo", "gold", "matcha"],
+        "composition_title": "支出組成",
+        "composition_style": "donut",
+        "cumulative_title": "累積淨額",
+        "ranking_title": "支出分類排行",
+    }
+
+
+def _composition_entries(data: dict, presentation: dict) -> list[tuple[str, Decimal, Decimal]]:
+    """Return account, absolute chart magnitude, and signed cash-flow value."""
+    kind = presentation["composition_kind"]
+    entries = [
+        (account, abs(amount), amount)
+        for account, amount in data[f"{kind}_categories"].items()
+        if amount != 0
+    ]
+    entries.sort(key=lambda item: item[1], reverse=True)
+    return entries
 
 
 def render_dashboard_png(
@@ -634,6 +723,7 @@ def render_dashboard_png(
     }
     currency = data["currency"]
     totals = data["totals"]
+    presentation = _dashboard_presentation(data)
     output = Path(output).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -661,13 +751,12 @@ def render_dashboard_png(
         va="top",
     )
 
-    cards = [
-        ("收入", totals["income"], palette["matcha"], palette["green_wash"]),
-        ("支出", totals["expense"], palette["sakura"], palette["pink_wash"]),
-        ("淨額", totals["net"], palette["indigo"], palette["blue_wash"]),
-    ]
-    card_grid = grid[0, :].subgridspec(1, 3, wspace=0.18)
-    for index, (label, value, accent, background) in enumerate(cards):
+    cards = presentation["cards"]
+    card_grid = grid[0, :].subgridspec(1, len(cards), wspace=0.18)
+    for index, (label, value_key, accent_key, background_key) in enumerate(cards):
+        value = totals[value_key]
+        accent = palette[accent_key]
+        background = palette[background_key]
         axis = fig.add_subplot(card_grid[0, index])
         axis.set_axis_off()
         axis.add_patch(
@@ -681,15 +770,18 @@ def render_dashboard_png(
                 edgecolor="none",
             )
         )
-        axis.text(0.07, 0.72, label, fontsize=10.5, color=palette["gray"], va="center")
+        text_x = 0.5 if len(cards) == 1 else 0.07
+        text_align = "center" if len(cards) == 1 else "left"
+        axis.text(text_x, 0.72, label, fontsize=10.5, color=palette["gray"], va="center", ha=text_align)
         axis.text(
-            0.07,
+            text_x,
             0.36,
             _chart_amount(value, currency),
             fontsize=18,
             fontweight="bold",
             color=accent,
             va="center",
+            ha=text_align,
         )
 
     def style_axis(axis, title_text: str) -> None:
@@ -701,96 +793,134 @@ def render_dashboard_png(
         axis.set_axisbelow(True)
 
     month_axis = fig.add_subplot(grid[1, :4])
-    style_axis(month_axis, "月度收支趨勢")
+    style_axis(month_axis, presentation["month_title"])
     month_labels = list(data["months"])
     positions = list(range(len(month_labels)))
-    incomes = [float(data["months"][month]["income"]) for month in month_labels]
-    expenses = [float(data["months"][month]["expense"]) for month in month_labels]
-    width = 0.34
-    month_axis.bar([x - width / 2 for x in positions], incomes, width, label="收入", color=palette["matcha"])
-    month_axis.bar([x + width / 2 for x in positions], expenses, width, label="支出", color=palette["sakura"])
+    month_series = presentation["month_series"]
+    width = 0.34 if len(month_series) == 2 else 0.56
+    offsets = [-width / 2, width / 2] if len(month_series) == 2 else [0]
+    for (key, label, color_key), offset in zip(month_series, offsets):
+        values = [float(data["months"][month][key]) for month in month_labels]
+        month_axis.bar(
+            [position + offset for position in positions],
+            values,
+            width,
+            label=label,
+            color=palette[color_key],
+        )
     month_axis.set_xticks(positions, [month.replace("-", "/") for month in month_labels])
     if len(month_labels) > 8:
         month_axis.tick_params(axis="x", rotation=35)
+    month_axis.axhline(0, color=palette["grid"], linewidth=1)
     month_axis.yaxis.set_major_formatter(lambda value, _pos: _axis_number(value))
-    month_axis.legend(frameon=False, fontsize=9, ncol=2, loc="upper right")
+    if len(month_series) > 1:
+        month_axis.legend(frameon=False, fontsize=9, ncol=2, loc="upper right")
 
     donut_axis = fig.add_subplot(grid[1, 4:])
-    donut_axis.set_title("支出組成", loc="left", fontsize=12, fontweight="bold", color=palette["sumi"], pad=12)
-    positive_categories = [
-        (account, amount) for account, amount in data["expense_categories"].items() if amount > 0
-    ]
-    positive_categories.sort(key=lambda item: item[1], reverse=True)
-    top = positive_categories[:5]
-    remainder = sum((amount for _, amount in positive_categories[5:]), Decimal("0"))
+    donut_axis.set_title(
+        presentation["composition_title"],
+        loc="left",
+        fontsize=12,
+        fontweight="bold",
+        color=palette["sumi"],
+        pad=12,
+    )
+    composition_kind = presentation["composition_kind"]
+    account_prefix = presentation["account_prefix"]
+    composition_entries = _composition_entries(data, presentation)
+    composition_top = composition_entries[:5]
+    remainder = sum((magnitude for _, magnitude, _ in composition_entries[5:]), Decimal("0"))
     if remainder > 0:
-        top.append(("expenses:其他", remainder))
-    if top:
+        signed_remainder = -remainder if composition_kind == "expense" else remainder
+        composition_top.append((f"{account_prefix}其他", remainder, signed_remainder))
+    if composition_top:
         donut_colors = [
-            palette["sakura"],
-            palette["indigo"],
-            palette["gold"],
-            palette["matcha"],
+            *(palette[color_key] for color_key in presentation["composition_colors"]),
             "#9B8FA6",
             "#B7B0A4",
         ]
         labels = [
-            _ellipsize(account.removeprefix("expenses:").replace(":", "/"), 26)
-            for account, _ in top
+            _ellipsize(account.removeprefix(account_prefix).replace(":", "/"), 26)
+            for account, _, _ in composition_top
         ]
-        sizes = [float(amount) for _, amount in top]
+        sizes = [float(magnitude) for _, magnitude, _ in composition_top]
+        wedgeprops = {"edgecolor": "white", "linewidth": 2}
+        if presentation["composition_style"] == "donut":
+            wedgeprops["width"] = 0.38
         donut_axis.pie(
             sizes,
             colors=donut_colors[: len(sizes)],
             startangle=90,
             counterclock=False,
-            wedgeprops={"width": 0.38, "edgecolor": "white", "linewidth": 2},
+            wedgeprops=wedgeprops,
         )
-        donut_axis.text(0, 0.05, "總支出", ha="center", va="center", fontsize=9, color=palette["gray"])
-        donut_axis.text(
-            0,
-            -0.15,
-            _chart_amount(totals["expense"], currency),
-            ha="center",
-            va="center",
-            fontsize=10.5,
-            fontweight="bold",
-            color=palette["sumi"],
-        )
+        if presentation["composition_style"] == "donut":
+            total_label = "總支出" if composition_kind == "expense" else "總收入"
+            donut_axis.text(0, 0.05, total_label, ha="center", va="center", fontsize=9, color=palette["gray"])
+            donut_axis.text(
+                0,
+                -0.15,
+                _chart_amount(totals[composition_kind], currency),
+                ha="center",
+                va="center",
+                fontsize=10.5,
+                fontweight="bold",
+                color=palette["sumi"],
+            )
         donut_axis.legend(labels, loc="lower center", bbox_to_anchor=(0.5, -0.28), frameon=False, fontsize=7.5, ncol=2)
     else:
-        donut_axis.text(0.5, 0.5, "無支出資料", ha="center", va="center", color=palette["gray"])
+        missing_label = "無支出資料" if composition_kind == "expense" else "無收入資料"
+        donut_axis.text(0.5, 0.5, missing_label, ha="center", va="center", color=palette["gray"])
         donut_axis.set_axis_off()
 
     cumulative_axis = fig.add_subplot(grid[2, :3])
-    style_axis(cumulative_axis, "累積淨額")
+    style_axis(cumulative_axis, presentation["cumulative_title"])
     cumulative_dates = [datetime.fromisoformat(day) for day, _ in data["cumulative_net"]]
     cumulative_values = [float(value) for _, value in data["cumulative_net"]]
     cumulative_axis.plot(cumulative_dates, cumulative_values, color=palette["indigo"], linewidth=2.4)
     cumulative_axis.fill_between(cumulative_dates, cumulative_values, 0, color=palette["blue_wash"], alpha=0.9)
     cumulative_axis.axhline(0, color=palette["grid"], linewidth=1)
-    cumulative_axis.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=7))
+    if len(cumulative_dates) == 1:
+        cumulative_axis.scatter(cumulative_dates, cumulative_values, color=palette["indigo"], s=24, zorder=3)
+        cumulative_axis.set_xlim(
+            cumulative_dates[0] - timedelta(days=1),
+            cumulative_dates[0] + timedelta(days=1),
+        )
+        cumulative_axis.set_xticks(cumulative_dates)
+    else:
+        cumulative_axis.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=7))
     cumulative_axis.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
     cumulative_axis.yaxis.set_major_formatter(lambda value, _pos: _axis_number(value))
 
     category_axis = fig.add_subplot(grid[2, 3:])
-    style_axis(category_axis, "支出分類排行")
-    category_top = positive_categories[:6][::-1]
+    style_axis(category_axis, presentation["ranking_title"])
+    category_top = composition_entries[:6][::-1]
     if category_top:
         labels = [
-            _ellipsize(account.removeprefix("expenses:").replace(":", "/"), 26)
-            for account, _ in category_top
+            _ellipsize(account.removeprefix(account_prefix).replace(":", "/"), 26)
+            for account, _, _ in category_top
         ]
-        values = [float(amount) for _, amount in category_top]
-        colors = [palette["sakura"]] * len(values)
-        colors[-1] = palette["indigo"]
+        values = [float(magnitude) for _, magnitude, _ in category_top]
+        signed_values = [signed for _, _, signed in category_top]
+        base_color = palette["sakura"] if composition_kind == "expense" else palette["matcha"]
+        colors = [base_color] * len(values)
+        if len(colors) > 1:
+            colors[-1] = palette["indigo"]
         category_axis.barh(labels, values, color=colors, height=0.58)
-        category_axis.margins(x=0.16)
+        category_axis.margins(x=0.2)
         category_axis.xaxis.set_major_formatter(lambda value, _pos: _axis_number(value))
-        for index, value in enumerate(values):
-            category_axis.text(value, index, f"  {_axis_number(value)}", va="center", fontsize=8, color=palette["gray"])
+        for index, (value, signed_value) in enumerate(zip(values, signed_values)):
+            category_axis.text(
+                value,
+                index,
+                f"  {_chart_amount(signed_value, currency)}",
+                va="center",
+                fontsize=8,
+                color=palette["gray"],
+            )
     else:
-        category_axis.text(0.5, 0.5, "無支出資料", transform=category_axis.transAxes, ha="center", va="center", color=palette["gray"])
+        missing_label = "無支出資料" if composition_kind == "expense" else "無收入資料"
+        category_axis.text(0.5, 0.5, missing_label, transform=category_axis.transAxes, ha="center", va="center", color=palette["gray"])
 
     fig.text(
         0.055,
