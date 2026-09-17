@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+coverage.xml
+.coverage
+htmlcov/
+reports/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.journal
+classification-rules.json
