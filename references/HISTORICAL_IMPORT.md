@@ -34,6 +34,34 @@ Examples:
 - A card export may show a purchase as `+120`. It is still an expense: debit the expense and credit the card liability.
 - A source balance of `3199082` for money owed on a card is an opening liability: debit equity and credit the liability. Do not post a positive amount to the liability merely because the source displayed it as positive.
 
+## MOZE loan terminology
+
+In MOZE exports, `信貸` means an unsecured/personal **loan** (`liabilities:loans:personal` or an equivalent loan account). It does not mean a credit card and must never be mapped to `liabilities:credit-card`.
+
+Interpret related rows by their economic event:
+
+- A negative `應付款項` row paid by `錢包`, with `子類別: 信貸`, is normally loan-principal repayment: debit `liabilities:loans:personal` and credit the mapped wallet/bank asset. Never debit and credit the wallet itself.
+- A separately exported `利息` / `分期利息` row is an interest expense: debit `expenses:interest` and credit the paying asset. Do not include it again in principal.
+- A positive `應付款項` row on the `信貸` account represents a new or increased loan obligation. Credit the loan liability and debit the actual disbursement destination only when that destination is supported by the export or reconciliation evidence; otherwise quarantine the row.
+- `初始金額` for `信貸` is an opening loan liability only when its as-of date is known. Debit `equity:opening-balances` and credit the loan liability. Never invent a date such as `2017-01-01`; obtain an explicit snapshot date or quarantine it.
+- A later `餘額調整` is not automatically a payment or opening balance. Quarantine it until its purpose and counter-account are known.
+
+The normalized principal-payment shape is:
+
+```json
+{
+  "kind": "transfer",
+  "date": "2024-09-08",
+  "description": "Personal-loan principal payment",
+  "amount": "50629",
+  "currency": "TWD",
+  "debit": "liabilities:loans:personal",
+  "credit": "assets:cash:wallet",
+  "import_id": "moze-stable-row-id",
+  "tags": ["source:historical-import"]
+}
+```
+
 ## Required workflow
 
 ### 1. Profile the source without writing

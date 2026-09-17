@@ -856,6 +856,25 @@ class FuzzyIngestTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "account families"):
                     build_ingest_transactions(payload, existing_text="")
 
+    def test_transfer_rejects_identical_debit_and_credit_accounts(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "transfer",
+                    "date": "2024-09-08",
+                    "description": "Loan principal payment",
+                    "amount": "50629",
+                    "currency": "TWD",
+                    "debit": "assets:cash:wallet",
+                    "credit": "assets:cash:wallet",
+                    "import_id": "moze-loan-payment-1",
+                    "tags": ["source:historical-import"],
+                }
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "different debit and credit accounts"):
+            build_ingest_transactions(payload, existing_text="")
+
     def test_historical_refund_and_transfer_accept_valid_account_families(self):
         payload = {
             "transactions": [

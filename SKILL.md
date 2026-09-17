@@ -187,6 +187,8 @@ Direction summary:
 - positive opening asset: debit asset, credit `equity:opening-balances`;
 - opening debt: debit `equity:opening-balances`, credit liability.
 
+MOZE-specific rule: `信貸` means an unsecured/personal **loan**, not a credit card. Map it to an account such as `liabilities:loans:personal`; never to `liabilities:credit-card`. A negative `應付款項` row whose subcategory is `信貸` is normally a loan-principal payment: debit the loan liability and credit the actual paying asset. Keep separately exported `利息` as an interest expense. A positive loan-liability row is a new/increased loan obligation, not an opening balance merely because it is positive; require the actual disbursement destination or quarantine it. Never use the same account on both sides of a transfer—the CLI rejects such no-op transfers.
+
 ## Import a known positive-expense CSV
 
 Preview a normal import with a stable ID column:

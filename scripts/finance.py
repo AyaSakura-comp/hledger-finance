@@ -1657,6 +1657,10 @@ def build_ingest_transactions(
         if debit != "auto":
             debit = _validate_account(debit)
         credit = _validate_account(credit)
+        if kind == "transfer" and debit == credit:
+            raise ValueError(
+                f"Ingest record {index} transfer requires different debit and credit accounts"
+            )
         if kind == "opening-balance":
             debit_is_asset = debit == "assets" or debit.startswith("assets:")
             debit_is_opening_equity = _is_opening_equity(debit)
