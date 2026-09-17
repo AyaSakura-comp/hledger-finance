@@ -60,10 +60,22 @@ Each transaction requires:
 Each transaction may override any default and may add:
 
 - `import_id`: stable non-secret ID containing only ASCII letters, digits, `.`, `_`, and `-`; canonical tag duplicates already in the journal are skipped. It is mandatory for `source:structured-csv` and `source:historical-import`.
+- `debit_amount`: positive decimal; the debit-side amount for cross-currency `kind:transfer` only.
+- `debit_currency`: hledger commodity; the debit-side currency for cross-currency `kind:transfer` only.
+
+Cross-currency transfers (`kind:transfer` with both `debit_amount` and `debit_currency`):
+
+- Both `debit_amount` and `debit_currency` must be present together; one without the other is rejected.
+- The debit posting uses hledger total price syntax: `debit_amount debit_currency @@ amount currency`.
+- The credit posting uses `-amount currency` as normal.
+- `debit_currency` must differ from `currency` (same-currency transfers use the standard form).
+- `debit_amount` must be a positive finite decimal; `NaN` and `Infinity` are rejected.
+- Installments and fees are not supported on cross-currency transfers.
+- All existing strict source/date/account/import-id rules and the different-account guard still apply.
 
 The CLI appends a canonical `kind:*` tag and converts `import_id` to `import-id:*`. These prefixes are reserved: do not place `kind:*` or `import-id:*` directly in `tags`.
 
-Unknown fields, duplicate JSON object keys, and non-finite JSON numbers (`NaN`/`Infinity`) are rejected instead of silently ignored. Decimal JSON literals are parsed directly as decimal values rather than binary floats, preserving financial precision. This catches agent-generated typos such as `ammount` and ambiguous payloads containing two `amount` keys. Descriptions, dates, currencies, accounts, tags, fee accounts, and import IDs must use their documented JSON string types; `null`, booleans, containers, empty required strings, terminal control characters, and non-finite decimal amounts/fees are rejected. `installments` must be a JSON integer of at least one; booleans and fractional numbers are rejected.
+Unknown fields, duplicate JSON object keys, and non-finite JSON numbers (`NaN`/`Infinity`) are rejected instead of silently ignored. Decimal JSON literals are parsed directly as decimal values rather than binary floats, preserving financial precision. This catches agent-generated typos such as `ammount` and ambiguous payloads containing two `amount` keys. Descriptions, dates, currencies, accounts, tags, fee accounts, and import IDs must use their documented JSON string types; `null`, booleans, containers, empty required strings, terminal control characters, and non-finite decimal amounts/fees are rejected. `installments` must be a JSON integer of at least one; booleans and fractional numbers are rejected. `debit_amount` and `debit_currency` follow the same validation: positive finite decimal and valid hledger commodity respectively, required together only for `kind:transfer`.
 
 `kind: expense` permits `debit: auto` and controlled payment-source defaults. Every non-expense kind requires explicit `debit` and `credit` accounts and cannot use `debit: auto`; this prevents income, refunds, transfers, and opening balances from silently becoming expenses.
 

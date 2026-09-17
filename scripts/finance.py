@@ -397,6 +397,55 @@ def render_transaction(
     return "\n".join(lines) + "\n\n"
 
 
+def render_cross_currency_transfer(
+    txn_date: date,
+    description: str,
+    debit_account: str,
+    credit_account: str,
+    *,
+    amount: Decimal,
+    currency: str,
+    debit_amount: Decimal,
+    debit_currency: str,
+    tags: Sequence[str] = (),
+) -> str:
+    """Render a single balanced transaction with total price syntax.
+
+    Debit posting uses total price syntax::
+        debit_amount debit_currency @@ amount currency
+
+    Credit posting uses the normal credit amount::
+        -amount currency
+
+    Both sides balance because total price syntax declares the equivalent
+    value at the time of the transaction.
+    """
+    debit_account = _validate_account(debit_account)
+    credit_account = _validate_account(credit_account)
+    description = _validate_description(description)
+    currency = _validate_currency(currency)
+    try:
+        debit_currency = _validate_currency(debit_currency)
+    except ValueError as error:
+        raise ValueError(f"debit_currency: {error}") from error
+    try:
+        if debit_amount <= 0 or not debit_amount.is_finite():
+            raise ValueError("debit_amount must be a positive finite decimal")
+    except InvalidOperation as error:
+        raise ValueError(f"debit_amount must be a positive finite decimal") from error
+    if currency == debit_currency:
+        raise ValueError("Cross-currency transfer requires different debit and credit currencies")
+    lines = [f"{txn_date.isoformat()} {description}"]
+    for tag in tags:
+        lines.append(f"    ; {_validate_tag(tag)}")
+    lines.append(
+        f"    {debit_account:<40}  {_decimal_text(debit_amount)} {debit_currency} "
+        f"@@ {_decimal_text(amount)} {currency}"
+    )
+    lines.append(f"    {credit_account:<40}  -{_decimal_text(amount)} {currency}")
+    return "\n".join(lines) + "\n\n"
+
+
 def render_installments(
     *,
     start: date,
@@ -1573,7 +1622,8 @@ def build_ingest_transactions(
     if not isinstance(records, list) or not records:
         raise ValueError("Ingest payload requires a non-empty transactions list")
 
-    allowed_record = allowed_defaults | {"description", "amount", "import_id"}
+    allowed_record = allowed_defaults | {"description", "amount", "import_id",
+                                        "debit_amount", "debit_currency"}
     seen_ids = _existing_import_ids(existing_text)
     output: list[str] = []
     decisions: list[dict] = []
@@ -1661,6 +1711,12 @@ def build_ingest_transactions(
             raise ValueError(
                 f"Ingest record {index} transfer requires different debit and credit accounts"
             )
+
+        _has_debit_amount = "debit_amount" in record or "debit_amount" in defaults
+        _has_debit_currency = "debit_currency" in record or "debit_currency" in defaults
+        _cross_currency = {"debit_amount": record.get("debit_amount", defaults.get("debit_amount")),
+                           "debit_currency": record.get("debit_currency", defaults.get("debit_currency"))}
+
         if kind == "opening-balance":
             debit_is_asset = debit == "assets" or debit.startswith("assets:")
             debit_is_opening_equity = _is_opening_equity(debit)
@@ -1701,6 +1757,46 @@ def build_ingest_transactions(
             raise ValueError(f"Ingest record {index} fee must not be negative")
         if fee and _account_family(fee_account) != "expenses":
             raise ValueError(f"Ingest record {index} fee_account must be an expenses account")
+
+        if kind == "transfer" and (_has_debit_amount or _has_debit_currency):
+            if not _has_debit_amount or not _has_debit_currency:
+                raise ValueError(
+                    f"Ingest record {index} cross-currency transfer requires both debit_amount and debit_currency"
+                )
+            try:
+                _cross_debit_amount = Decimal(str(_cross_currency["debit_amount"]))
+            except (InvalidOperation, TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Ingest record {index} has an invalid debit_amount"
+                ) from error
+            if not isinstance(_cross_debit_amount, Decimal) or not _cross_debit_amount.is_finite() or _cross_debit_amount <= 0:
+                raise ValueError(
+                    f"Ingest record {index} debit_amount must be a positive finite decimal"
+                )
+            try:
+                _cross_debit_currency = _validate_currency(
+                    _ingest_string(_cross_currency["debit_currency"],
+                                   f"Ingest record {index} debit_currency")
+                )
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Ingest record {index} has an invalid debit_currency"
+                ) from error
+            if currency == _cross_debit_currency:
+                raise ValueError(
+                    f"Ingest record {index} cross-currency transfer requires different debit and credit currencies"
+                )
+            if count != 1:
+                raise ValueError(
+                    f"Ingest record {index} cross-currency transfer cannot use installments"
+                )
+            if not fee.is_finite() or fee != 0:
+                raise ValueError(
+                    f"Ingest record {index} cross-currency transfer cannot use fees"
+                )
+            _cross_render = True
+        else:
+            _cross_render = False
 
         default_tags = defaults.get("tags", [])
         record_tags = record.get("tags", [])
@@ -1759,20 +1855,36 @@ def build_ingest_transactions(
         if kind != "opening-balance":
             _validate_kind_accounts(kind, debit, credit, f"Ingest record {index}")
         decisions.append({"record": index, "description": description, **decision})
-        output.append(
-            render_installments(
-                start=txn_date,
-                description=description,
-                total=amount,
-                count=count,
-                debit_account=debit,
-                credit_account=credit,
+
+        if _cross_render:
+            cross_journal = render_cross_currency_transfer(
+                txn_date,
+                description,
+                debit,
+                credit,
+                amount=_cross_debit_amount,
                 currency=currency,
-                fee_per_installment=fee,
-                fee_account=fee_account,
+                debit_amount=_cross_debit_amount,
+                debit_currency=_cross_debit_currency,
                 tags=tags,
             )
-        )
+        else:
+            cross_journal = (
+                render_installments(
+                    start=txn_date,
+                    description=description,
+                    total=amount,
+                    count=count,
+                    debit_account=debit,
+                    credit_account=credit,
+                    currency=currency,
+                    fee_per_installment=fee,
+                    fee_account=fee_account,
+                    tags=tags,
+                )
+            )
+
+        output.append(cross_journal)
         imported += 1
         if import_id:
             seen_ids.add(import_id)

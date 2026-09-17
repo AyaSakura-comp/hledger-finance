@@ -46,7 +46,7 @@ Interpret related rows by their economic event:
 - `初始金額` for `信貸` is an opening loan liability only when its as-of date is known. Debit `equity:opening-balances` and credit the loan liability. Never invent a date such as `2017-01-01`; obtain an explicit snapshot date or quarantine it.
 - A later `餘額調整` is not automatically a payment or opening balance. Quarantine it until its purpose and counter-account are known.
 
-The normalized principal-payment shape is:
+The normalized principal-payment shape for same-currency transfers:
 
 ```json
 {
@@ -61,6 +61,43 @@ The normalized principal-payment shape is:
   "tags": ["source:historical-import"]
 }
 ```
+
+MOZE cross-currency pair (credit asset:cash:wallet, debit liability):
+
+```json
+{
+  "kind": "transfer",
+  "date": "2024-09-08",
+  "description": "MOZE credit-asset repayment",
+  "amount": "3000",
+  "currency": "TWD",
+  "debit": "assets:cash:wallet",
+  "credit": "liabilities:credit-card",
+  "import_id": "moze-pair-001",
+  "tags": ["source:historical-import"],
+  "debit_amount": "14368",
+  "debit_currency": "JPY"
+}
+```
+
+`hfin` renders this as a single balanced transaction using hledger total price syntax:
+
+```
+2024-09-08 MOZE credit-asset repayment
+    ; source:historical-import
+    ; kind:transfer
+    ; import-id:moze-pair-001
+    assets:cash:wallet                     14368 JPY @@ 3000 TWD
+    liabilities:credit-card                -3000 TWD
+```
+
+Rules for cross-currency transfers:
+
+- Both `debit_amount` and `debit_currency` must be present together; one without the other is rejected.
+- `debit_currency` must differ from `currency` (same-currency transfers use the standard form without cross-currency fields).
+- `debit_amount` must be a positive finite decimal; `NaN` and `Infinity` are rejected.
+- Installments and fees are not supported on cross-currency transfers.
+- All existing strict source/date/account/import-id rules and the different-account guard still apply.
 
 ## Required workflow
 
