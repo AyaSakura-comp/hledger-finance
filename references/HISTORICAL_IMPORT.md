@@ -98,14 +98,14 @@ Asset-to-asset cross-currency transfer (wallet JPY to bank TWD):
   "kind": "transfer",
   "date": "2024-09-08",
   "description": "Cross-currency asset transfer",
-  "amount": "3000",
-  "currency": "TWD",
-  "debit": "assets:cash:wallet",
-  "credit": "assets:bank:checking",
+  "amount": "14368",
+  "currency": "JPY",
+  "debit": "assets:bank:checking",
+  "credit": "assets:cash:wallet",
   "import_id": "moze-asset-pair-001",
   "tags": ["source:historical-import"],
-  "debit_amount": "14368",
-  "debit_currency": "JPY"
+  "debit_amount": "3000",
+  "debit_currency": "TWD"
 }
 ```
 
@@ -116,8 +116,8 @@ Asset-to-asset cross-currency transfer (wallet JPY to bank TWD):
     ; source:historical-import
     ; kind:transfer
     ; import-id:moze-asset-pair-001
-    assets:cash:wallet                  14368 JPY @@ 3000 TWD
-    assets:bank:checking                  -3000 TWD
+    assets:bank:checking                  3000 TWD @@ 14368 JPY
+    assets:cash:wallet                  -14368 JPY
 ```
 
 Rules for cross-currency transfers:
