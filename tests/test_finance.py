@@ -1723,6 +1723,133 @@ class AuditTests(unittest.TestCase):
                 self.assertFalse(report["ok"])
                 self.assertGreater(report["critical_count"], 0)
 
+    def test_audit_rejects_adjustment_with_prices_or_mismatched_amounts(self):
+        tags = [
+            ["kind", "adjustment"],
+            ["source", "historical-import"],
+            ["import-id", "invalid-adjustment-amounts"],
+        ]
+        cases = (
+            (
+                {"acommodity": "USD", "aquantity": {"floatingPoint": 10}},
+                {"acommodity": "TWD", "aquantity": {"floatingPoint": -10}},
+            ),
+            (
+                {"acommodity": "TWD", "aquantity": {"floatingPoint": 10}},
+                {"acommodity": "TWD", "aquantity": {"floatingPoint": -9}},
+            ),
+            (
+                {
+                    "acommodity": "TWD",
+                    "aquantity": {"floatingPoint": 10},
+                    "aprice": {
+                        "tag": "TotalPrice",
+                        "contents": {
+                            "acommodity": "TWD",
+                            "aquantity": {"floatingPoint": 10},
+                        },
+                    },
+                },
+                {"acommodity": "TWD", "aquantity": {"floatingPoint": -10}},
+            ),
+        )
+        for asset_amount, equity_amount in cases:
+            with self.subTest(asset_amount=asset_amount, equity_amount=equity_amount):
+                transaction = {
+                    "tdate": "2024-01-02",
+                    "tdescription": "Invalid adjustment amounts",
+                    "ttags": tags,
+                    "tpostings": [
+                        {"paccount": "assets:bank", "pamount": [asset_amount]},
+                        {"paccount": "equity:migration:legacy", "pamount": [equity_amount]},
+                    ],
+                }
+                report = audit_journal([transaction], "")
+                self.assertIn(
+                    "tagged-transaction-invalid-structure",
+                    {finding["code"] for finding in report["findings"]},
+                )
+
+    def test_audit_strict_accepts_real_hledger_same_currency_adjustment(self):
+        journal_text = (
+            "2024-01-02 Ordinary adjustment\n"
+            "    ; kind:adjustment\n"
+            "    ; source:historical-import\n"
+            "    ; import-id:ordinary-adjustment\n"
+            "    assets:bank  10 TWD\n"
+            "    equity:migration:legacy  -10 TWD\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "ordinary-adjustment.journal"
+            journal.write_text(journal_text, encoding="utf-8")
+            printed = subprocess.run(
+                ["hledger", "-f", str(journal), "print", "--output-format=json"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            strict_audit = subprocess.run(
+                [
+                    sys.executable,
+                    str(SKILL_DIR / "scripts" / "finance.py"),
+                    "--journal",
+                    str(journal),
+                    "audit",
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(printed.returncode, 0, printed.stderr)
+        transactions = json.loads(printed.stdout)
+        report = audit_journal(transactions, journal_text)
+        self.assertTrue(report["ok"], report["findings"])
+        self.assertEqual(strict_audit.returncode, 0, strict_audit.stderr or strict_audit.stdout)
+
+    def test_audit_strict_rejects_real_hledger_priced_cross_currency_adjustment(self):
+        journal_text = (
+            "2024-01-02 Priced cross-currency adjustment\n"
+            "    ; kind:adjustment\n"
+            "    ; source:historical-import\n"
+            "    ; import-id:priced-cross-currency-adjustment\n"
+            "    assets:bank  10 USD @@ 300 TWD\n"
+            "    equity:migration:legacy  -300 TWD\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "priced-cross-currency-adjustment.journal"
+            journal.write_text(journal_text, encoding="utf-8")
+            printed = subprocess.run(
+                ["hledger", "-f", str(journal), "print", "--output-format=json"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            strict_audit = subprocess.run(
+                [
+                    sys.executable,
+                    str(SKILL_DIR / "scripts" / "finance.py"),
+                    "--journal",
+                    str(journal),
+                    "audit",
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(printed.returncode, 0, printed.stderr)
+        transactions = json.loads(printed.stdout)
+        self.assertIsNotNone(transactions[0]["tpostings"][0]["pamount"][0]["aprice"])
+        report = audit_journal(transactions, journal_text)
+        self.assertIn(
+            "tagged-transaction-invalid-structure",
+            {finding["code"] for finding in report["findings"]},
+        )
+        self.assertEqual(strict_audit.returncode, 2, strict_audit.stderr or strict_audit.stdout)
+
 
 class ImportTests(unittest.TestCase):
     def test_empty_csv_import_is_a_clean_noop(self):

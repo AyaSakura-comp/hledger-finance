@@ -623,6 +623,20 @@ def _kind_structure_is_valid(transaction: dict, kind: str) -> bool:
         postings = transaction.get("tpostings", [])
         if len(postings) != 2 or any(len(posting.get("pamount", [])) != 1 for posting in postings):
             return False
+        amounts = [posting["pamount"][0] for posting in postings]
+        values = [_amount_decimal(amount) for amount in amounts]
+        if (
+            any(value == 0 for value in values)
+            or any(amount.get("aprice") is not None for amount in amounts)
+            or any(
+                posting.get(annotation) is not None
+                for posting in postings
+                for annotation in ("pcost", "pprice")
+            )
+            or amounts[0].get("acommodity") != amounts[1].get("acommodity")
+            or values[0] != -values[1]
+        ):
+            return False
         if len(entries) != 2:
             return False
         migration_entries = [
