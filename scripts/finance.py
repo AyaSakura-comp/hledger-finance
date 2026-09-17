@@ -433,6 +433,11 @@ def render_cross_currency_transfer(
             raise ValueError("debit_amount must be a positive finite decimal")
     except InvalidOperation as error:
         raise ValueError(f"debit_amount must be a positive finite decimal") from error
+    try:
+        if amount <= 0 or not amount.is_finite():
+            raise ValueError("amount must be a positive finite decimal")
+    except InvalidOperation as error:
+        raise ValueError("amount must be a positive finite decimal") from error
     if currency == debit_currency:
         raise ValueError("Cross-currency transfer requires different debit and credit currencies")
     lines = [f"{txn_date.isoformat()} {description}"]
@@ -1798,6 +1803,11 @@ def build_ingest_transactions(
         else:
             _cross_render = False
 
+        if kind != "transfer" and (_has_debit_amount or _has_debit_currency):
+            raise ValueError(
+                f"Ingest record {index} debit_amount and debit_currency are only valid on kind:transfer"
+            )
+
         default_tags = defaults.get("tags", [])
         record_tags = record.get("tags", [])
         if not isinstance(default_tags, list) or not isinstance(record_tags, list):
@@ -1862,7 +1872,7 @@ def build_ingest_transactions(
                 description,
                 debit,
                 credit,
-                amount=_cross_debit_amount,
+                amount=amount,
                 currency=currency,
                 debit_amount=_cross_debit_amount,
                 debit_currency=_cross_debit_currency,

@@ -2376,15 +2376,19 @@ class CrossCurrencyTransferTests(unittest.TestCase):
             "MOZE loan repayment",
             "liabilities:loans:personal",
             "assets:cash:wallet",
-            amount=Decimal("50629"),
+            amount=Decimal("3000"),
             currency="TWD",
             debit_amount=Decimal("14368"),
             debit_currency="JPY",
         )
-        self.assertIn("14368 JPY @@ 50629 TWD", journal)
+        # debit_amount (14368 JPY) is the debit posting; amount (3000 TWD) is the @@ target and credit
+        self.assertIn("14368 JPY @@ 3000 TWD", journal)
         self.assertIn("liabilities:loans:personal", journal)
         self.assertIn("assets:cash:wallet", journal)
-        self.assertIn("-50629 TWD", journal)
+        self.assertIn("-3000 TWD", journal)
+        # The @@ target and credit must both use `amount`, NOT debit_amount
+        self.assertNotIn("@@ 14368 TWD", journal)
+        self.assertNotIn("-14368 TWD", journal)
 
     def test_render_cross_currency_balances_with_hledger_check(self):
         journal = render_cross_currency_transfer(
@@ -2415,7 +2419,7 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 "Zero debit",
                 "assets:bank",
                 "assets:cash",
-                amount=Decimal("100"),
+                amount=Decimal("3000"),
                 currency="TWD",
                 debit_amount=Decimal("0"),
                 debit_currency="USD",
@@ -2428,7 +2432,7 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 "Negative debit",
                 "assets:bank",
                 "assets:cash",
-                amount=Decimal("100"),
+                amount=Decimal("3000"),
                 currency="TWD",
                 debit_amount=Decimal("-50"),
                 debit_currency="USD",
@@ -2441,7 +2445,7 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 "NaN debit",
                 "assets:bank",
                 "assets:cash",
-                amount=Decimal("100"),
+                amount=Decimal("3000"),
                 currency="TWD",
                 debit_amount=Decimal("NaN"),
                 debit_currency="USD",
@@ -2454,7 +2458,7 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 "Same currency",
                 "assets:bank",
                 "assets:cash",
-                amount=Decimal("100"),
+                amount=Decimal("3000"),
                 currency="TWD",
                 debit_amount=Decimal("50"),
                 debit_currency="TWD",
@@ -2467,23 +2471,62 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 "Bad currency",
                 "assets:bank",
                 "assets:cash",
-                amount=Decimal("100"),
+                amount=Decimal("3000"),
                 currency="TWD",
                 debit_amount=Decimal("50"),
                 debit_currency="USD; kind:expense",
             )
 
-    def test_render_cross_currency_validates_debit_amount_as_decimal(self):
-        with self.assertRaisesRegex(ValueError, "debit_amount"):
+    def test_render_cross_currency_rejects_zero_amount(self):
+        with self.assertRaisesRegex(ValueError, "amount"):
             render_cross_currency_transfer(
                 date(2024, 9, 8),
-                "Not decimal",
+                "Zero amount",
                 "assets:bank",
                 "assets:cash",
-                amount=Decimal("100"),
+                amount=Decimal("0"),
                 currency="TWD",
-                debit_amount=Decimal("NaN"),
-                debit_currency="USD",
+                debit_amount=Decimal("14368"),
+                debit_currency="JPY",
+            )
+
+    def test_render_cross_currency_rejects_negative_amount(self):
+        with self.assertRaisesRegex(ValueError, "amount"):
+            render_cross_currency_transfer(
+                date(2024, 9, 8),
+                "Negative amount",
+                "assets:bank",
+                "assets:cash",
+                amount=Decimal("-3000"),
+                currency="TWD",
+                debit_amount=Decimal("14368"),
+                debit_currency="JPY",
+            )
+
+    def test_render_cross_currency_rejects_nonfinite_amount(self):
+        with self.assertRaisesRegex(ValueError, "amount"):
+            render_cross_currency_transfer(
+                date(2024, 9, 8),
+                "NaN amount",
+                "assets:bank",
+                "assets:cash",
+                amount=Decimal("NaN"),
+                currency="TWD",
+                debit_amount=Decimal("14368"),
+                debit_currency="JPY",
+            )
+
+    def test_render_cross_currency_rejects_infinity_amount(self):
+        with self.assertRaisesRegex(ValueError, "amount"):
+            render_cross_currency_transfer(
+                date(2024, 9, 8),
+                "Infinity amount",
+                "assets:bank",
+                "assets:cash",
+                amount=Decimal("Infinity"),
+                currency="TWD",
+                debit_amount=Decimal("14368"),
+                debit_currency="JPY",
             )
 
     def test_build_ingest_rejects_single_cross_currency_field(self):
@@ -2512,8 +2555,8 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 {
                     "kind": "transfer",
                     "date": "2024-09-08",
-                    "description": "MOZE repayment",
-                    "amount": "50629",
+                    "description": "Loan repayment",
+                    "amount": "3000",
                     "currency": "TWD",
                     "debit": "liabilities:loans:personal",
                     "credit": "assets:cash:wallet",
@@ -2535,8 +2578,8 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 {
                     "kind": "transfer",
                     "date": "2024-09-08",
-                    "description": "MOZE repayment",
-                    "amount": "50629",
+                    "description": "Loan repayment",
+                    "amount": "3000",
                     "currency": "TWD",
                     "debit": "liabilities:loans:personal",
                     "credit": "assets:cash:wallet",
@@ -2557,8 +2600,8 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 {
                     "kind": "transfer",
                     "date": "2024-09-08",
-                    "description": "MOZE repayment",
-                    "amount": "50629",
+                    "description": "Loan repayment",
+                    "amount": "3000",
                     "currency": "TWD",
                     "debit": "liabilities:loans:personal",
                     "credit": "assets:cash:wallet",
@@ -2580,7 +2623,7 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                     "kind": "transfer",
                     "date": "2024-09-08",
                     "description": "MOZE repayment",
-                    "amount": "50629",
+                    "amount": "3000",
                     "currency": "TWD",
                     "debit": "liabilities:loans:personal",
                     "credit": "assets:cash:wallet",
@@ -2601,7 +2644,7 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                     "kind": "transfer",
                     "date": "2024-09-08",
                     "description": "MOZE repayment",
-                    "amount": "50629",
+                    "amount": "3000",
                     "currency": "TWD",
                     "debit": "liabilities:loans:personal",
                     "credit": "assets:cash:wallet",
@@ -2622,7 +2665,7 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                     "kind": "transfer",
                     "date": "2024-09-08",
                     "description": "MOZE repayment",
-                    "amount": "50629",
+                    "amount": "3000",
                     "currency": "TWD",
                     "debit": "liabilities:loans:personal",
                     "credit": "assets:cash:wallet",
@@ -2643,7 +2686,7 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                     "kind": "transfer",
                     "date": "2024-09-08",
                     "description": "Transfer between accounts",
-                    "amount": "50000",
+                    "amount": "10000",
                     "currency": "TWD",
                     "debit": "assets:bank",
                     "credit": "assets:cash",
@@ -2656,8 +2699,10 @@ class CrossCurrencyTransferTests(unittest.TestCase):
             payload, existing_text=""
         )
         self.assertEqual((imported, skipped), (1, 0))
-        self.assertIn("50000 TWD", journal_text)
+        self.assertIn("10000 TWD", journal_text)
         self.assertNotIn("@@", journal_text)
+        self.assertIn("assets:bank", journal_text)
+        self.assertIn("assets:cash", journal_text)
 
     def test_build_ingest_rendered_cross_currency_transaction_passes_hledger_check(self):
         payload = {
@@ -2665,8 +2710,8 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 {
                     "kind": "transfer",
                     "date": "2024-09-08",
-                    "description": "MOZE loan repayment",
-                    "amount": "50629",
+                    "description": "Loan principal repayment",
+                    "amount": "3000",
                     "currency": "TWD",
                     "debit": "liabilities:loans:personal",
                     "credit": "assets:cash:wallet",
@@ -2681,6 +2726,11 @@ class CrossCurrencyTransferTests(unittest.TestCase):
             payload, existing_text=""
         )
         self.assertEqual((imported, skipped), (1, 0))
+        # Verify the rendered text has the correct @@ target and credit
+        self.assertIn("14368 JPY @@ 3000 TWD", journal_text)
+        self.assertIn("-3000 TWD", journal_text)
+        self.assertNotIn("@@ 14368 TWD", journal_text)
+        self.assertNotIn("-14368 TWD", journal_text)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "book.journal"
             path.write_text(journal_text, encoding="utf-8")
@@ -2698,8 +2748,8 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 {
                     "kind": "transfer",
                     "date": "2024-09-08",
-                    "description": "MOZE loan repayment",
-                    "amount": "50629",
+                    "description": "Loan principal repayment",
+                    "amount": "3000",
                     "currency": "TWD",
                     "debit": "liabilities:loans:personal",
                     "credit": "assets:cash:wallet",
@@ -2713,17 +2763,18 @@ class CrossCurrencyTransferTests(unittest.TestCase):
         journal_text, imported, skipped, _ = build_ingest_transactions(
             payload, existing_text=""
         )
-        # Audit via hledger check is already verified above;
-        # also verify audit_journal does not flag structure for @@ postings
-        result = subprocess.run(
-            ["hledger", "-f", Path(tempfile.mkdtemp()).parent / "test.journal", "check"],
-            text=True,
-            capture_output=True,
-            check=False,
+        self.assertEqual((imported, skipped), (1, 0))
+        # Verify audit_journal does not flag structure for @@ postings
+        transactions = parse_ingest_json(
+            json.dumps(payload, ensure_ascii=False)
         )
-        # The real test: the rendered text must pass hledger check (above)
-        # and audit must not flag cross-currency transfers as invalid structure
-        self.assertNotIn("invalid-structure", journal_text.lower())
+        report = audit_journal(transactions["transactions"], journal_text)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["critical_count"], 0)
+        self.assertNotIn(
+            "tagged-transaction-invalid-structure",
+            {f["code"] for f in report["findings"]}
+        )
 
     def test_build_ingest_preserves_kind_import_id_source_tags_on_cross_currency(self):
         payload = {
@@ -2731,8 +2782,8 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 {
                     "kind": "transfer",
                     "date": "2024-09-08",
-                    "description": "MOZE repayment",
-                    "amount": "50629",
+                    "description": "Loan principal repayment",
+                    "amount": "3000",
                     "currency": "TWD",
                     "debit": "liabilities:loans:personal",
                     "credit": "assets:cash:wallet",
@@ -2746,9 +2797,23 @@ class CrossCurrencyTransferTests(unittest.TestCase):
         journal_text, imported, skipped, _ = build_ingest_transactions(
             payload, existing_text=""
         )
+        self.assertEqual((imported, skipped), (1, 0))
         self.assertIn("; kind:transfer", journal_text)
         self.assertIn("; import-id:moze-repay-001", journal_text)
         self.assertIn("; source:historical-import", journal_text)
+        # Exact ingest-to-render assertion: output must match render_cross_currency_transfer
+        expected = render_cross_currency_transfer(
+            date(2024, 9, 8),
+            "Loan principal repayment",
+            "liabilities:loans:personal",
+            "assets:cash:wallet",
+            amount=Decimal("3000"),
+            currency="TWD",
+            debit_amount=Decimal("14368"),
+            debit_currency="JPY",
+            tags=["source:historical-import", "kind:transfer", "import-id:moze-repay-001"],
+        )
+        self.assertEqual(journal_text, expected)
 
     def test_build_ingest_same_currency_transfer_without_debit_fields_is_normal_transfer(self):
         payload = {
@@ -2772,6 +2837,115 @@ class CrossCurrencyTransferTests(unittest.TestCase):
         self.assertEqual((imported, skipped), (1, 0))
         self.assertIn("10000 TWD", journal_text)
         self.assertNotIn("@@", journal_text)
+
+    def test_build_ingest_rejects_debit_amount_on_non_transfer_kind(self):
+        cases = [
+            ("expense", "expenses:food", "assets:cash"),
+            ("income", "assets:bank", "income:salary"),
+            ("refund", "assets:bank", "expenses:food"),
+            ("opening-balance", "assets:bank", "equity:opening-balances"),
+        ]
+        for kind, debit, credit in cases:
+            with self.subTest(kind=kind):
+                payload = {
+                    "transactions": [
+                        {
+                            "kind": kind,
+                            "date": "2024-09-08",
+                            "description": "Non-transfer with debit_amount",
+                            "amount": "120",
+                            "currency": "TWD",
+                            "debit": debit,
+                            "credit": credit,
+                            "import_id": f"non-transfer-debit-{kind}",
+                            "tags": ["source:historical-import"],
+                            "debit_amount": "50",
+                            "debit_currency": "JPY",
+                        }
+                    ]
+                }
+                with self.assertRaisesRegex(ValueError, "debit_amount.*transfer|debit_amount.*only valid"):
+                    build_ingest_transactions(payload, existing_text="")
+
+    def test_build_ingest_rejects_debit_currency_on_non_transfer_kind(self):
+        for kind, debit, credit in (("expense", "expenses:food", "assets:cash"),
+                                     ("income", "assets:bank", "income:salary"),
+                                     ("refund", "assets:bank", "expenses:food"),
+                                     ("opening-balance", "assets:bank", "equity:opening-balances")):
+            with self.subTest(kind=kind):
+                payload = {
+                    "transactions": [
+                        {
+                            "kind": kind,
+                            "date": "2024-09-08",
+                            "description": "Non-transfer with debit_currency",
+                            "amount": "120",
+                            "currency": "TWD",
+                            "debit": debit,
+                            "credit": credit,
+                            "import_id": f"non-transfer-cur-{kind}",
+                            "tags": ["source:historical-import"],
+                            "debit_currency": "JPY",
+                        }
+                    ]
+                }
+                with self.assertRaisesRegex(ValueError, "debit_currency.*transfer|debit_currency.*only valid"):
+                    build_ingest_transactions(payload, existing_text="")
+
+    def test_build_ingest_cross_currency_render_matches_renderer_directly(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "transfer",
+                    "date": "2024-09-08",
+                    "description": "Loan principal repayment",
+                    "amount": "3000",
+                    "currency": "TWD",
+                    "debit": "liabilities:loans:personal",
+                    "credit": "assets:cash:wallet",
+                    "import_id": "moze-repay-001",
+                    "tags": ["source:historical-import"],
+                    "debit_amount": "14368",
+                    "debit_currency": "JPY",
+                }
+            ]
+        }
+        journal_text, imported, skipped, _ = build_ingest_transactions(
+            payload, existing_text=""
+        )
+        expected = render_cross_currency_transfer(
+            date(2024, 9, 8),
+            "Loan principal repayment",
+            "liabilities:loans:personal",
+            "assets:cash:wallet",
+            amount=Decimal("3000"),
+            currency="TWD",
+            debit_amount=Decimal("14368"),
+            debit_currency="JPY",
+            tags=["source:historical-import", "kind:transfer", "import-id:moze-repay-001"],
+        )
+        self.assertEqual(journal_text, expected)
+
+    def test_build_ingest_rejects_negative_amount_on_cross_currency_transfer(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "transfer",
+                    "date": "2024-09-08",
+                    "description": "Negative amount",
+                    "amount": "-3000",
+                    "currency": "TWD",
+                    "debit": "liabilities:loans:personal",
+                    "credit": "assets:cash:wallet",
+                    "import_id": "neg-amount",
+                    "tags": ["source:historical-import"],
+                    "debit_amount": "14368",
+                    "debit_currency": "JPY",
+                }
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "positive"):
+            build_ingest_transactions(payload, existing_text="")
 
 
 if __name__ == "__main__":

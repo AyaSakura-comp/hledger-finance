@@ -62,18 +62,18 @@ The normalized principal-payment shape for same-currency transfers:
 }
 ```
 
-MOZE cross-currency pair (credit asset:cash:wallet, debit liability):
+MOZE cross-currency pair (principal repayment: debit liability, credit asset):
 
 ```json
 {
   "kind": "transfer",
   "date": "2024-09-08",
-  "description": "MOZE credit-asset repayment",
+  "description": "Loan principal repayment",
   "amount": "3000",
   "currency": "TWD",
-  "debit": "assets:cash:wallet",
-  "credit": "liabilities:credit-card",
-  "import_id": "moze-pair-001",
+  "debit": "liabilities:loans:personal",
+  "credit": "assets:cash:wallet",
+  "import_id": "moze-repayment-001",
   "tags": ["source:historical-import"],
   "debit_amount": "14368",
   "debit_currency": "JPY"
@@ -83,12 +83,41 @@ MOZE cross-currency pair (credit asset:cash:wallet, debit liability):
 `hfin` renders this as a single balanced transaction using hledger total price syntax:
 
 ```
-2024-09-08 MOZE credit-asset repayment
+2024-09-08 Loan principal repayment
     ; source:historical-import
     ; kind:transfer
-    ; import-id:moze-pair-001
-    assets:cash:wallet                     14368 JPY @@ 3000 TWD
-    liabilities:credit-card                -3000 TWD
+    ; import-id:moze-repayment-001
+    liabilities:loans:personal          14368 JPY @@ 3000 TWD
+    assets:cash:wallet                   -3000 TWD
+```
+
+Asset-to-asset cross-currency transfer (wallet JPY to bank TWD):
+
+```json
+{
+  "kind": "transfer",
+  "date": "2024-09-08",
+  "description": "Cross-currency asset transfer",
+  "amount": "3000",
+  "currency": "TWD",
+  "debit": "assets:cash:wallet",
+  "credit": "assets:bank:checking",
+  "import_id": "moze-asset-pair-001",
+  "tags": ["source:historical-import"],
+  "debit_amount": "14368",
+  "debit_currency": "JPY"
+}
+```
+
+`hfin` renders this as:
+
+```
+2024-09-08 Cross-currency asset transfer
+    ; source:historical-import
+    ; kind:transfer
+    ; import-id:moze-asset-pair-001
+    assets:cash:wallet                  14368 JPY @@ 3000 TWD
+    assets:bank:checking                  -3000 TWD
 ```
 
 Rules for cross-currency transfers:
