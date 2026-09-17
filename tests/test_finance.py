@@ -1,29 +1,37 @@
 import csv
 import io
 import json
+import os
 import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import warnings
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from unittest import mock
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_DIR))
 
 from scripts.finance import (  # noqa: E402
+    _acquire_journal_lock,
+    _append_validated_and_commit,
     _axis_number,
+    _require_regular_journal,
     _chart_amount,
     _ellipsize,
     add_months,
     build_hledger_query,
+    build_ingest_transactions,
     build_visualization_data,
     classify_description,
     compute_stats,
     import_csv_transactions,
+    parse_ingest_json,
     parse_period,
     render_dashboard_png,
     render_installments,
@@ -353,7 +361,401 @@ class VisualizationQATemplateTests(unittest.TestCase):
             self.assertIn(scenario["kind"], {"render", "error"})
 
 
+class FuzzyIngestTests(unittest.TestCase):
+    def test_normalized_batch_uses_safe_defaults_and_auto_category(self):
+        payload = {
+            "defaults": {
+                "date": "2026-09-17",
+                "kind": "expense",
+                "currency": "TWD",
+                "credit": "assets:cash",
+                "tags": ["source:fuzzy-text"],
+            },
+            "transactions": [
+                {"description": "晚餐", "amount": "1200", "tags": ["inferred:date"]},
+            ],
+        }
+        journal_text, imported, skipped, decisions = build_ingest_transactions(
+            payload,
+            existing_text="",
+            classification_transactions=[],
+            classification_rules=[],
+        )
+        self.assertEqual((imported, skipped), (1, 0))
+        self.assertIn("2026-09-17 晚餐", journal_text)
+        self.assertIn("expenses:food:dining", journal_text)
+        self.assertIn("assets:cash", journal_text)
+        self.assertIn("; source:fuzzy-text", journal_text)
+        self.assertIn("; inferred:date", journal_text)
+        self.assertEqual(decisions[0]["account"], "expenses:food:dining")
+
+    def test_import_id_text_in_a_description_does_not_cause_a_false_duplicate(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "expense",
+                    "description": "Dinner",
+                    "amount": "1200",
+                    "import_id": "receipt-abc",
+                    "tags": ["source:receipt-image"],
+                }
+            ]
+        }
+        existing = "2026-09-16 Note import-id:receipt-abc\n    expenses:food  1 TWD\n    assets:cash\n"
+        journal_text, imported, skipped, _decisions = build_ingest_transactions(
+            payload,
+            existing_text=existing,
+        )
+        self.assertEqual((imported, skipped), (1, 0))
+        self.assertIn("; import-id:receipt-abc", journal_text)
+
+    def test_duplicate_record_still_requires_strict_schema_validation(self):
+        payload = {
+            "transactions": [
+                {
+                    "description": "Dinner",
+                    "amount": "not-a-number",
+                    "import_id": "receipt-abc",
+                }
+            ]
+        }
+        existing = "2026-09-17 Old\n    ; import-id:receipt-abc\n    expenses:food  1 TWD\n    assets:cash\n"
+        with self.assertRaisesRegex(ValueError, "kind|amount|source"):
+            build_ingest_transactions(payload, existing_text=existing)
+
+    def test_batch_is_idempotent_when_import_id_already_exists(self):
+        payload = {
+            "defaults": {
+                "date": "2026-09-17",
+                "kind": "expense",
+                "credit": "assets:cash",
+                "tags": ["source:receipt-image"],
+            },
+            "transactions": [
+                {"description": "Receipt dinner", "amount": "1200", "import_id": "receipt-abc"}
+            ],
+        }
+        existing = "2026-09-17 Old\n    ; import-id:receipt-abc\n    expenses:food  1 TWD\n    assets:cash\n"
+        journal_text, imported, skipped, _decisions = build_ingest_transactions(
+            payload,
+            existing_text=existing,
+            classification_transactions=[],
+            classification_rules=[],
+        )
+        self.assertEqual(journal_text, "")
+        self.assertEqual((imported, skipped), (0, 1))
+
+    def test_batch_rejects_unknown_fields_instead_of_ignoring_agent_typos(self):
+        payload = {
+            "defaults": {
+                "date": "2026-09-17",
+                "kind": "expense",
+                "credit": "assets:cash",
+                "tags": ["source:fuzzy-text"],
+            },
+            "transactions": [
+                {"description": "Dinner", "ammount": "1200"},
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "unknown fields.*ammount"):
+            build_ingest_transactions(
+                payload,
+                existing_text="",
+                classification_transactions=[],
+                classification_rules=[],
+            )
+
+    def test_cli_ingest_json_writes_multiple_records_in_one_undoable_commit(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            batch = Path(tmp) / "batch.json"
+            batch.write_text(
+                json.dumps(
+                    {
+                        "defaults": {
+                            "date": "2026-09-17",
+                            "kind": "expense",
+                            "currency": "TWD",
+                            "credit": "assets:cash",
+                            "tags": ["source:messy-csv"],
+                        },
+                        "transactions": [
+                            {"description": "早餐", "amount": "80"},
+                            {"description": "晚餐", "amount": "1200"},
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            before = subprocess.run(
+                ["git", "-C", tmp, "rev-list", "--count", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            result = subprocess.run(
+                base + ["ingest-json", str(batch)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            after = subprocess.run(
+                ["git", "-C", tmp, "rev-list", "--count", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            text = journal.read_text(encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Records ready: 2", result.stderr)
+        self.assertIn("早餐", text)
+        self.assertIn("晚餐", text)
+        self.assertEqual(int(after), int(before) + 1)
+
+    def test_batch_requires_explicit_transaction_kind(self):
+        payload = {
+            "defaults": {"tags": ["source:fuzzy-text"]},
+            "transactions": [{"description": "Possibly a refund", "amount": "500"}],
+        }
+        with self.assertRaisesRegex(ValueError, "kind"):
+            build_ingest_transactions(payload, existing_text="")
+
+    def test_non_expense_kind_requires_explicit_accounts(self):
+        payload = {
+            "defaults": {"tags": ["source:messy-csv"]},
+            "transactions": [
+                {"kind": "income", "description": "Salary", "amount": "50000"},
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "explicit debit and credit"):
+            build_ingest_transactions(payload, existing_text="")
+
+    def test_installment_count_rejects_fractional_and_boolean_json_values(self):
+        for invalid_count in (1.9, True):
+            with self.subTest(invalid_count=invalid_count):
+                payload = {
+                    "defaults": {"kind": "expense", "tags": ["source:fuzzy-text"]},
+                    "transactions": [
+                        {"description": "Phone", "amount": "1200", "installments": invalid_count},
+                    ],
+                }
+                with self.assertRaisesRegex(ValueError, "installments must be a positive integer"):
+                    build_ingest_transactions(payload, existing_text="")
+
+    def test_ingest_requires_exactly_one_approved_source_tag(self):
+        for tags in ([], ["source:fuzzy-text", "source:receipt-image"], ["source:unknown"]):
+            with self.subTest(tags=tags):
+                payload = {
+                    "defaults": {"kind": "expense", "tags": tags},
+                    "transactions": [{"description": "Dinner", "amount": "1200"}],
+                }
+                with self.assertRaisesRegex(ValueError, "source tag"):
+                    build_ingest_transactions(payload, existing_text="")
+
+    def test_json_decimal_literals_preserve_exact_value(self):
+        payload = parse_ingest_json('{"amount":9007199254740993.01}')
+        self.assertEqual(payload["amount"], Decimal("9007199254740993.01"))
+
+    def test_non_finite_json_constants_and_decimals_are_rejected(self):
+        for constant in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(constant=constant):
+                with self.assertRaisesRegex(ValueError, "non-finite"):
+                    parse_ingest_json(f'{{"amount":{constant}}}')
+        for field, value in (("amount", "NaN"), ("fee", "Infinity")):
+            with self.subTest(field=field):
+                record = {
+                    "kind": "expense",
+                    "description": "Dinner",
+                    "amount": "1200",
+                    "tags": ["source:fuzzy-text"],
+                    field: value,
+                }
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    build_ingest_transactions({"transactions": [record]}, existing_text="")
+
+    def test_duplicate_json_keys_are_rejected(self):
+        raw = '{"transactions":[{"kind":"expense","description":"Dinner","amount":"100","amount":"900","tags":["source:fuzzy-text"]}]}'
+        with self.assertRaisesRegex(ValueError, "duplicate key.*amount"):
+            parse_ingest_json(raw)
+
+    def test_terminal_control_characters_are_rejected(self):
+        payload = {
+            "defaults": {"kind": "expense", "tags": ["source:fuzzy-text"]},
+            "transactions": [{"description": "Dinner\u001b[31m", "amount": "1200"}],
+        }
+        with self.assertRaisesRegex(ValueError, "control"):
+            build_ingest_transactions(payload, existing_text="")
+
+    def test_concurrent_duplicate_import_ids_are_written_once(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            batch = Path(tmp) / "batch.json"
+            payload = {
+                "transactions": [
+                    {
+                        "kind": "expense",
+                        "description": "Dinner",
+                        "amount": "1200",
+                        "import_id": "same-receipt",
+                        "tags": ["source:receipt-image"],
+                    }
+                ]
+            }
+            batch.write_text(json.dumps(payload), encoding="utf-8")
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            lock = _acquire_journal_lock(journal)
+            try:
+                first = subprocess.Popen(base + ["ingest-json", str(batch)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                second = subprocess.Popen(base + ["ingest-json", str(batch)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                time.sleep(0.5)
+            finally:
+                lock.close()
+            first_stdout, first_stderr = first.communicate(timeout=10)
+            second_stdout, second_stderr = second.communicate(timeout=10)
+            text = journal.read_text(encoding="utf-8")
+        self.assertEqual(first.returncode, 0, first_stderr or first_stdout)
+        self.assertEqual(second.returncode, 0, second_stderr or second_stdout)
+        self.assertEqual(text.count("import-id:same-receipt"), 1)
+
+    def test_ingest_rejects_non_string_schema_values(self):
+        cases = [
+            ({"kind": "expense", "description": None, "amount": "10", "tags": ["source:fuzzy-text"]}, "description"),
+            ({"kind": "income", "description": "Salary", "amount": "10", "debit": "assets:bank", "credit": None, "tags": ["source:fuzzy-text"]}, "credit"),
+            ({"kind": "expense", "description": "Dinner", "amount": "10", "currency": None, "tags": ["source:fuzzy-text"]}, "currency"),
+            ({"kind": "expense", "description": "Dinner", "amount": "10", "import_id": None, "tags": ["source:fuzzy-text"]}, "import_id"),
+            ({"kind": "expense", "description": "Dinner", "amount": "10", "tags": ["source:fuzzy-text", None]}, "tag"),
+        ]
+        for record, field in cases:
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, field):
+                    build_ingest_transactions({"transactions": [record]}, existing_text="")
+
+    def test_false_or_empty_date_is_rejected_instead_of_defaulted(self):
+        for invalid_date in (False, ""):
+            with self.subTest(invalid_date=invalid_date):
+                payload = {
+                    "transactions": [
+                        {
+                            "kind": "expense",
+                            "date": invalid_date,
+                            "description": "Dinner",
+                            "amount": "1200",
+                            "tags": ["source:fuzzy-text"],
+                        }
+                    ]
+                }
+                with self.assertRaisesRegex(ValueError, "date"):
+                    build_ingest_transactions(payload, existing_text="")
+
+    def test_atomic_append_refuses_an_untracked_existing_journal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            book = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(book)], check=True)
+            journal = book / "main.journal"
+            journal.write_text("; manually created\n", encoding="utf-8")
+            addition = "2026-09-17 Dinner\n    expenses:food  100 TWD\n    assets:cash  -100 TWD\n\n"
+            with self.assertRaisesRegex(ValueError, "untracked"):
+                _append_validated_and_commit(journal, addition, "test commit")
+            self.assertEqual(journal.read_text(encoding="utf-8"), "; manually created\n")
+
+    def test_atomic_append_refuses_unstaged_manual_journal_edits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            book = Path(tmp)
+            journal = book / "main.journal"
+            journal.write_text("; original\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(book)], check=True)
+            subprocess.run(["git", "-C", str(book), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(book), "config", "user.email", "test@example.com"], check=True)
+            subprocess.run(["git", "-C", str(book), "add", "main.journal"], check=True)
+            subprocess.run(["git", "-C", str(book), "commit", "-qm", "init"], check=True)
+            journal.write_text("; original\n; manual edit\n", encoding="utf-8")
+            addition = "2026-09-17 Dinner\n    expenses:food  100 TWD\n    assets:cash  -100 TWD\n\n"
+            with self.assertRaisesRegex(ValueError, "unstaged"):
+                _append_validated_and_commit(journal, addition, "test commit")
+            self.assertEqual(journal.read_text(encoding="utf-8"), "; original\n; manual edit\n")
+
+    def test_atomic_append_refuses_unrelated_staged_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            book = Path(tmp)
+            journal = book / "main.journal"
+            journal.write_text("; original\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(book)], check=True)
+            subprocess.run(["git", "-C", str(book), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(book), "config", "user.email", "test@example.com"], check=True)
+            subprocess.run(["git", "-C", str(book), "add", "main.journal"], check=True)
+            subprocess.run(["git", "-C", str(book), "commit", "-qm", "init"], check=True)
+            note = book / "note.txt"
+            note.write_text("keep staged\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(book), "add", "note.txt"], check=True)
+            addition = "2026-09-17 Dinner\n    expenses:food  100 TWD\n    assets:cash  -100 TWD\n\n"
+            with self.assertRaisesRegex(ValueError, "staged"):
+                _append_validated_and_commit(journal, addition, "test commit")
+            self.assertEqual(journal.read_text(encoding="utf-8"), "; original\n")
+            staged = subprocess.run(
+                ["git", "-C", str(book), "diff", "--cached", "--name-only"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()
+            self.assertEqual(staged, ["note.txt"])
+
+    def test_regular_journal_check_rejects_fifo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fifo = Path(tmp) / "main.journal"
+            os.mkfifo(fifo)
+            with self.assertRaisesRegex(ValueError, "regular file"):
+                _require_regular_journal(fifo)
+
+    def test_atomic_append_rejects_symlink_journal_without_replacing_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            book = Path(tmp)
+            target = book / "actual.journal"
+            target.write_text("; original\n", encoding="utf-8")
+            link = book / "main.journal"
+            link.symlink_to(target)
+            addition = "2026-09-17 Dinner\n    expenses:food  100 TWD\n    assets:cash  -100 TWD\n\n"
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                _append_validated_and_commit(link, addition, "test commit")
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(target.read_text(encoding="utf-8"), "; original\n")
+
+    def test_atomic_append_restores_original_when_git_commit_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            original = "; original\n"
+            journal.write_text(original, encoding="utf-8")
+            addition = "2026-09-17 Dinner\n    expenses:food  100 TWD\n    assets:cash  -100 TWD\n\n"
+            with mock.patch(
+                "scripts.finance._git_commit",
+                side_effect=subprocess.CalledProcessError(1, ["git", "commit"]),
+            ):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    _append_validated_and_commit(journal, addition, "test commit")
+            self.assertEqual(journal.read_text(encoding="utf-8"), original)
+
+
 class ImportTests(unittest.TestCase):
+    def test_csv_import_rejects_noncanonical_import_id(self):
+        rows = [{"date": "2026-09-17", "description": "Dinner", "amount": "120", "id": "bank/123"}]
+        with self.assertRaisesRegex(ValueError, "import ID"):
+            import_csv_transactions(
+                rows=rows,
+                existing_text="",
+                default_debit="expenses:food",
+                credit_account="assets:cash",
+                currency="TWD",
+                date_column="date",
+                description_column="description",
+                amount_column="amount",
+                id_column="id",
+            )
+
     def test_csv_import_supports_per_row_installment_count_and_deduplication(self):
         rows = list(csv.DictReader(io.StringIO(
             "date,description,amount,installments,id,category\n"
@@ -411,6 +813,22 @@ class ImportTests(unittest.TestCase):
 
 
 class CliWriteBehaviorTests(unittest.TestCase):
+    def test_init_rejects_a_symlink_journal(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "actual.journal"
+            target.write_text("; original\n", encoding="utf-8")
+            journal = Path(tmp) / "main.journal"
+            journal.symlink_to(target)
+            result = subprocess.run(
+                [sys.executable, str(script), "--journal", str(journal), "init"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr)
+
     def test_add_writes_by_default_without_confirmation_flag(self):
         script = SKILL_DIR / "scripts" / "finance.py"
         with tempfile.TemporaryDirectory() as tmp:
@@ -524,6 +942,32 @@ class CliWriteBehaviorTests(unittest.TestCase):
         self.assertIn("Breakfast", text)
         self.assertNotIn("Lunch", text)
         self.assertIn("Undo finance action", log)
+
+    def test_undo_waits_for_the_shared_journal_lock(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            subprocess.run(
+                base + [
+                    "add", "--date", "2026-09-17", "--description", "Dinner",
+                    "--amount", "100", "--debit", "expenses:food", "--credit", "assets:cash",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            lock = _acquire_journal_lock(journal)
+            try:
+                process = subprocess.Popen(base + ["undo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                time.sleep(0.3)
+                blocked = process.poll() is None
+            finally:
+                lock.close()
+            stdout, stderr = process.communicate(timeout=10)
+        self.assertTrue(blocked, "undo modified the journal without waiting for the shared lock")
+        self.assertEqual(process.returncode, 0, stderr or stdout)
 
     def test_add_requires_explicit_auto_mode_when_debit_is_omitted(self):
         script = SKILL_DIR / "scripts" / "finance.py"
@@ -660,6 +1104,37 @@ class CliWriteBehaviorTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(image_format, "PNG")
         self.assertIn(str(output), result.stdout)
+
+    def test_delete_search_waits_for_the_shared_journal_lock(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            subprocess.run(
+                base + [
+                    "add", "--date", "2026-09-17", "--description", "Dinner",
+                    "--amount", "100", "--debit", "expenses:food", "--credit", "assets:cash",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            lock = _acquire_journal_lock(journal)
+            try:
+                process = subprocess.Popen(
+                    base + ["delete", "--period", "2026-09-17", "--description", "Dinner"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                time.sleep(0.3)
+                blocked = process.poll() is None
+            finally:
+                lock.close()
+            stdout, stderr = process.communicate(timeout=10)
+        self.assertTrue(blocked, "delete read the journal without waiting for the shared lock")
+        self.assertEqual(process.returncode, 3, stderr or stdout)
 
     def test_delete_requires_matching_confirmation_token_and_can_be_undone(self):
         script = SKILL_DIR / "scripts" / "finance.py"

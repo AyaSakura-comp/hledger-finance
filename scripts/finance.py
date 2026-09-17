@@ -6,13 +6,16 @@ from __future__ import annotations
 import argparse
 import calendar
 import csv
+import fcntl
 import hashlib
 import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
+import tempfile
 import unicodedata
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -115,13 +118,20 @@ def _decimal_text(value: Decimal) -> str:
     return text or "0"
 
 
+def _reject_control_characters(value: str, label: str) -> None:
+    if any(unicodedata.category(character).startswith("C") for character in value):
+        raise ValueError(f"{label} contains unsafe control characters")
+
+
 def _validate_account(account: str) -> None:
-    if not account.strip() or "\n" in account or "\r" in account:
+    _reject_control_characters(account, "Account name")
+    if not account.strip():
         raise ValueError("Invalid account name")
 
 
 def _validate_text(value: str, label: str) -> str:
-    cleaned = " ".join(value.splitlines()).strip()
+    _reject_control_characters(value, label)
+    cleaned = value.strip()
     if not cleaned:
         raise ValueError(f"{label} must not be empty")
     return cleaned
@@ -794,6 +804,250 @@ def render_dashboard_png(
     return output
 
 
+def _reject_duplicate_json_keys(pairs: Sequence[tuple[str, object]]) -> dict:
+    result: dict = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Ingest JSON contains duplicate key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_json_constant(value: str):
+    raise ValueError(f"Ingest JSON contains non-finite number: {value}")
+
+
+def parse_ingest_json(raw: str) -> object:
+    try:
+        return json.loads(
+            raw,
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_float=Decimal,
+            parse_constant=_reject_nonfinite_json_constant,
+        )
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Invalid ingest JSON: {error}") from error
+
+
+def _ingest_string(value: object, label: str, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+    _reject_control_characters(value, label)
+    cleaned = value.strip()
+    if not cleaned and not allow_empty:
+        raise ValueError(f"{label} must not be empty")
+    return cleaned
+
+
+def _validate_import_id(value: object, label: str) -> str:
+    import_id = _ingest_string(value, label, allow_empty=True)
+    if import_id and not re.fullmatch(r"[A-Za-z0-9._-]+", import_id):
+        raise ValueError(
+            f"{label} may contain only ASCII letters, digits, '.', '_', and '-'"
+        )
+    return import_id
+
+
+def _existing_import_ids(journal_text: str) -> set[str]:
+    return set(
+        re.findall(
+            r"(?m)^\s*;\s*import-id:([A-Za-z0-9._-]+)\s*$",
+            journal_text,
+        )
+    )
+
+
+def build_ingest_transactions(
+    payload: object,
+    *,
+    existing_text: str,
+    classification_transactions: Sequence[dict] = (),
+    classification_rules: Sequence[dict[str, str]] = (),
+    today: date | None = None,
+) -> tuple[str, int, int, list[dict]]:
+    """Render agent-normalized fuzzy input as one validated journal addition."""
+    if isinstance(payload, list):
+        defaults: dict = {}
+        records = payload
+    elif isinstance(payload, dict):
+        unknown_top = set(payload) - {"defaults", "transactions"}
+        if unknown_top:
+            raise ValueError(f"Ingest payload has unknown fields: {', '.join(sorted(unknown_top))}")
+        defaults = payload.get("defaults", {})
+        records = payload.get("transactions")
+    else:
+        raise ValueError("Ingest payload must be a JSON object or list")
+    if not isinstance(defaults, dict):
+        raise ValueError("Ingest defaults must be an object")
+    allowed_defaults = {
+        "kind", "date", "currency", "debit", "credit", "tags", "installments", "fee", "fee_account"
+    }
+    unknown_defaults = set(defaults) - allowed_defaults
+    if unknown_defaults:
+        raise ValueError(f"Ingest defaults have unknown fields: {', '.join(sorted(unknown_defaults))}")
+    if not isinstance(records, list) or not records:
+        raise ValueError("Ingest payload requires a non-empty transactions list")
+
+    allowed_record = allowed_defaults | {"description", "amount", "import_id"}
+    seen_ids = _existing_import_ids(existing_text)
+    output: list[str] = []
+    decisions: list[dict] = []
+    imported = 0
+    skipped = 0
+    today = today or date.today()
+
+    for index, record in enumerate(records, start=1):
+        if not isinstance(record, dict):
+            raise ValueError(f"Ingest record {index} must be an object")
+        unknown = set(record) - allowed_record
+        if unknown:
+            raise ValueError(f"Ingest record {index} has unknown fields: {', '.join(sorted(unknown))}")
+        if "description" not in record or "amount" not in record:
+            raise ValueError(f"Ingest record {index} requires description and amount")
+
+        import_id = _validate_import_id(
+            record.get("import_id", ""),
+            f"Ingest record {index} import_id",
+        )
+
+        description = _ingest_string(record["description"], f"Ingest record {index} description")
+        if isinstance(record["amount"], bool) or not isinstance(record["amount"], (str, int, float, Decimal)):
+            raise ValueError(f"Ingest record {index} amount must be a decimal string or number")
+        try:
+            amount = Decimal(str(record["amount"]))
+        except InvalidOperation as error:
+            raise ValueError(f"Ingest record {index} has an invalid amount") from error
+        if not amount.is_finite():
+            raise ValueError(f"Ingest record {index} amount must be finite")
+        if amount <= 0:
+            raise ValueError(f"Ingest record {index} amount must be positive")
+
+        kind_value = record.get("kind", defaults.get("kind"))
+        kind = _ingest_string(kind_value, f"Ingest record {index} kind") if kind_value is not None else None
+        if kind not in {"expense", "income", "transfer", "refund"}:
+            raise ValueError(
+                f"Ingest record {index} kind must be expense, income, transfer, or refund"
+            )
+        has_date = "date" in record or "date" in defaults
+        raw_date = record.get("date", defaults.get("date"))
+        if has_date:
+            date_text = _ingest_string(raw_date, f"Ingest record {index} date")
+            txn_date = date.fromisoformat(date_text)
+        else:
+            txn_date = today
+        currency = _ingest_string(
+            record.get("currency", defaults.get("currency", "TWD")),
+            f"Ingest record {index} currency",
+        )
+        has_debit = "debit" in record or "debit" in defaults
+        has_credit = "credit" in record or "credit" in defaults
+        if kind == "expense":
+            debit = _ingest_string(
+                record.get("debit", defaults.get("debit", "auto")),
+                f"Ingest record {index} debit",
+            )
+            credit = _ingest_string(
+                record.get("credit", defaults.get("credit", "assets:cash")),
+                f"Ingest record {index} credit",
+            )
+        else:
+            if not has_debit or not has_credit:
+                raise ValueError(
+                    f"Ingest record {index} kind {kind} requires explicit debit and credit accounts"
+                )
+            debit = _ingest_string(
+                record.get("debit", defaults.get("debit")),
+                f"Ingest record {index} debit",
+            )
+            credit = _ingest_string(
+                record.get("credit", defaults.get("credit")),
+                f"Ingest record {index} credit",
+            )
+            if debit == "auto":
+                raise ValueError(f"Ingest record {index} kind {kind} cannot use debit auto")
+
+        count_value = record.get("installments", defaults.get("installments", 1))
+        if isinstance(count_value, bool) or not isinstance(count_value, int) or count_value < 1:
+            raise ValueError(f"Ingest record {index} installments must be a positive integer")
+        count = count_value
+        try:
+            fee = Decimal(str(record.get("fee", defaults.get("fee", "0"))))
+        except InvalidOperation as error:
+            raise ValueError(f"Ingest record {index} has an invalid fee") from error
+        if not fee.is_finite():
+            raise ValueError(f"Ingest record {index} fee must be finite")
+        fee_account = _ingest_string(
+            record.get("fee_account", defaults.get("fee_account", "expenses:fees")),
+            f"Ingest record {index} fee_account",
+        )
+
+        default_tags = defaults.get("tags", [])
+        record_tags = record.get("tags", [])
+        if not isinstance(default_tags, list) or not isinstance(record_tags, list):
+            raise ValueError(f"Ingest record {index} tags must be lists")
+        tags = list(
+            dict.fromkeys(
+                _ingest_string(tag, f"Ingest record {index} tag")
+                for tag in [*default_tags, *record_tags]
+            )
+        )
+        if not has_date:
+            tags.append("inferred:date")
+        if "credit" not in record and "credit" not in defaults:
+            tags.append("inferred:payment-account")
+        if "currency" not in record and "currency" not in defaults:
+            tags.append("inferred:currency")
+        approved_sources = {
+            "source:fuzzy-text",
+            "source:pasted-table",
+            "source:messy-csv",
+            "source:receipt-image",
+            "source:invoice-image",
+            "source:pdf",
+            "source:voice-transcript",
+        }
+        source_tags = [tag for tag in tags if tag.startswith("source:")]
+        if len(source_tags) != 1 or source_tags[0] not in approved_sources:
+            raise ValueError(
+                f"Ingest record {index} requires exactly one approved source tag"
+            )
+        if import_id and import_id in seen_ids:
+            skipped += 1
+            continue
+        if import_id:
+            tags.append(f"import-id:{import_id}")
+
+        if debit == "auto":
+            decision = classify_description(
+                description,
+                transactions=classification_transactions,
+                rules=classification_rules,
+            )
+            debit = str(decision["account"])
+        else:
+            decision = {"account": debit, "source": "explicit", "confidence": 1.0, "matched": description}
+        decisions.append({"record": index, "description": description, **decision})
+        output.append(
+            render_installments(
+                start=txn_date,
+                description=description,
+                total=amount,
+                count=count,
+                debit_account=debit,
+                credit_account=credit,
+                currency=currency,
+                fee_per_installment=fee,
+                fee_account=fee_account,
+                tags=tags,
+            )
+        )
+        imported += 1
+        if import_id:
+            seen_ids.add(import_id)
+
+    return "".join(output), imported, skipped, decisions
+
+
 def import_csv_transactions(
     *,
     rows: Iterable[dict[str, str]],
@@ -815,9 +1069,12 @@ def import_csv_transactions(
     output: list[str] = []
     imported = 0
     skipped = 0
-    seen_ids = set(re.findall(r"import-id:([^\s]+)", existing_text))
+    seen_ids = _existing_import_ids(existing_text)
     for index, row in enumerate(rows, start=2):
-        import_id = (row.get(id_column, "") if id_column else "").strip()
+        import_id = _validate_import_id(
+            (row.get(id_column, "") if id_column else ""),
+            f"CSV row {index} import ID",
+        )
         if import_id and import_id in seen_ids:
             skipped += 1
             continue
@@ -871,15 +1128,14 @@ def _run(command: Sequence[str], *, capture: bool = False) -> subprocess.Complet
     return subprocess.run(command, text=True, capture_output=capture, check=False)
 
 
-def _validate_candidate(journal: Path, addition: str) -> None:
-    import tempfile
+def _combined_journal_text(existing: str, addition: str) -> str:
+    separator = "\n" if existing and not existing.endswith("\n") else ""
+    return existing + separator + addition
 
-    existing = journal.read_text(encoding="utf-8") if journal.exists() else ""
+
+def _validate_journal_text(text: str) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".journal", encoding="utf-8", delete=False) as handle:
-        handle.write(existing)
-        if existing and not existing.endswith("\n"):
-            handle.write("\n")
-        handle.write(addition)
+        handle.write(text)
         candidate = Path(handle.name)
     try:
         result = _run(["hledger", "-f", str(candidate), "check"], capture=True)
@@ -889,22 +1145,148 @@ def _validate_candidate(journal: Path, addition: str) -> None:
         candidate.unlink(missing_ok=True)
 
 
-def append_validated(journal: Path, addition: str) -> None:
-    _ensure_journal(journal)
-    _validate_candidate(journal, addition)
-    with journal.open("a", encoding="utf-8") as handle:
-        if journal.stat().st_size and not journal.read_text(encoding="utf-8").endswith("\n"):
-            handle.write("\n")
-        handle.write(addition)
+def _validate_candidate(journal: Path, addition: str) -> None:
+    existing = journal.read_text(encoding="utf-8") if journal.exists() else ""
+    _validate_journal_text(_combined_journal_text(existing, addition))
 
 
-def _git_commit(book_dir: Path, message: str) -> None:
+def _atomic_replace_text(path: Path, text: str) -> None:
+    if path.exists() or path.is_symlink():
+        _require_regular_journal(path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        text=True,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.exists():
+            os.chmod(temporary, path.stat().st_mode & 0o777)
+        if path.exists() or path.is_symlink():
+            _require_regular_journal(path)
+        os.replace(temporary, path)
+        directory_descriptor = os.open(path.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _acquire_journal_lock(journal: Path):
+    identity = hashlib.sha256(str(journal.resolve()).encode("utf-8")).hexdigest()[:20]
+    lock_path = Path(tempfile.gettempdir()) / f"hfin-{identity}.lock"
+    handle = lock_path.open("a+", encoding="utf-8")
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    return handle
+
+
+def _require_regular_journal(journal: Path) -> None:
+    if journal.is_symlink():
+        raise ValueError("Journal symlinks are not supported for atomic writes")
+    if not stat.S_ISREG(journal.lstat().st_mode):
+        raise ValueError("Journal must be a regular file for atomic writes")
+
+
+def _reject_dirty_journal(journal: Path) -> None:
+    book_dir = journal.parent
     if not (book_dir / ".git").exists():
         return
-    subprocess.run(["git", "-C", str(book_dir), "add", "."], check=True)
+    relative = str(journal.relative_to(book_dir))
+    tracked = subprocess.run(
+        ["git", "-C", str(book_dir), "ls-files", "--error-unmatch", "--", relative],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if tracked.returncode:
+        raise ValueError("Refusing to ingest an existing untracked journal; run hfin init first")
+    result = subprocess.run(
+        ["git", "-C", str(book_dir), "diff", "--quiet", "--", relative],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 1:
+        raise ValueError("Refusing to ingest while the journal has unstaged Git changes")
+    if result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+
+
+def _reject_staged_changes(book_dir: Path) -> None:
+    if not (book_dir / ".git").exists():
+        return
+    result = subprocess.run(
+        ["git", "-C", str(book_dir), "diff", "--cached", "--quiet"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 1:
+        raise ValueError("Refusing to commit while unrelated staged Git changes exist")
+    if result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+
+
+def append_validated(journal: Path, addition: str) -> None:
+    _ensure_journal(journal)
+    _require_regular_journal(journal)
+    with _acquire_journal_lock(journal):
+        _require_regular_journal(journal)
+        existing = journal.read_text(encoding="utf-8")
+        candidate = _combined_journal_text(existing, addition)
+        _validate_journal_text(candidate)
+        _atomic_replace_text(journal, candidate)
+
+
+def _git_commit(book_dir: Path, message: str, paths: Sequence[Path] | None = None) -> None:
+    if not (book_dir / ".git").exists():
+        return
+    targets = [str(path.relative_to(book_dir)) for path in paths] if paths else ["."]
+    subprocess.run(["git", "-C", str(book_dir), "add", "--", *targets], check=True)
     diff = subprocess.run(["git", "-C", str(book_dir), "diff", "--cached", "--quiet"], check=False)
     if diff.returncode:
         subprocess.run(["git", "-C", str(book_dir), "commit", "-m", message], check=True)
+
+
+def _replace_validated_and_commit_locked(journal: Path, replacement: str, message: str) -> None:
+    _require_regular_journal(journal)
+    _reject_staged_changes(journal.parent)
+    _reject_dirty_journal(journal)
+    existing = journal.read_text(encoding="utf-8")
+    _validate_journal_text(replacement)
+    _atomic_replace_text(journal, replacement)
+    try:
+        _git_commit(journal.parent, message, paths=[journal])
+    except Exception:
+        _atomic_replace_text(journal, existing)
+        if (journal.parent / ".git").exists():
+            relative = str(journal.relative_to(journal.parent))
+            subprocess.run(
+                ["git", "-C", str(journal.parent), "reset", "--quiet", "HEAD", "--", relative],
+                check=False,
+                capture_output=True,
+            )
+        raise
+
+
+def _append_validated_and_commit_locked(journal: Path, addition: str, message: str) -> None:
+    existing = journal.read_text(encoding="utf-8")
+    candidate = _combined_journal_text(existing, addition)
+    _replace_validated_and_commit_locked(journal, candidate, message)
+
+
+def _append_validated_and_commit(journal: Path, addition: str, message: str) -> None:
+    _ensure_journal(journal)
+    _require_regular_journal(journal)
+    with _acquire_journal_lock(journal):
+        _append_validated_and_commit_locked(journal, addition, message)
 
 
 def _resolve_period(args: argparse.Namespace) -> tuple[date | None, date | None]:
@@ -920,8 +1302,7 @@ def _print_preview_or_append(args: argparse.Namespace, journal_text: str, messag
         print(journal_text, end="")
         print("Preview only; nothing was written.", file=sys.stderr)
         return 0
-    append_validated(args.journal, journal_text)
-    _git_commit(args.journal.parent, message)
+    _append_validated_and_commit(args.journal, journal_text, message)
     print(f"Appended to {args.journal}")
     return 0
 
@@ -929,17 +1310,23 @@ def _print_preview_or_append(args: argparse.Namespace, journal_text: str, messag
 def command_init(args: argparse.Namespace) -> int:
     book_dir = args.journal.parent
     book_dir.mkdir(parents=True, exist_ok=True)
-    if not args.journal.exists():
-        args.journal.write_text(
-            "; hledger personal finance journal\n"
-            "; Managed through the hledger-finance skill.\n\n",
-            encoding="utf-8",
-        )
-    if not (book_dir / ".git").exists():
-        subprocess.run(["git", "init", str(book_dir)], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(book_dir), "config", "user.name", "Finance Skill"], check=True)
-        subprocess.run(["git", "-C", str(book_dir), "config", "user.email", "finance-skill@localhost"], check=True)
-    _git_commit(book_dir, "Initialize hledger journal")
+    with _acquire_journal_lock(args.journal):
+        if args.journal.is_symlink():
+            raise ValueError("Journal symlinks are not supported for atomic writes")
+        if args.journal.exists():
+            _require_regular_journal(args.journal)
+        else:
+            _atomic_replace_text(
+                args.journal,
+                "; hledger personal finance journal\n"
+                "; Managed through the hledger-finance skill.\n\n",
+            )
+        if not (book_dir / ".git").exists():
+            subprocess.run(["git", "init", str(book_dir)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(book_dir), "config", "user.name", "Finance Skill"], check=True)
+            subprocess.run(["git", "-C", str(book_dir), "config", "user.email", "finance-skill@localhost"], check=True)
+        _reject_staged_changes(book_dir)
+        _git_commit(book_dir, "Initialize hledger journal", paths=[args.journal])
     print(args.journal)
     return 0
 
@@ -995,31 +1382,84 @@ def command_installment(args: argparse.Namespace) -> int:
     return _print_preview_or_append(args, transaction, f"Add {args.count} installments: {args.description}")
 
 
+def command_ingest_json(args: argparse.Namespace) -> int:
+    _ensure_journal(args.journal)
+    _require_regular_journal(args.journal)
+    try:
+        raw = sys.stdin.read() if args.file == "-" else Path(args.file).read_text(encoding="utf-8")
+    except OSError as error:
+        raise ValueError(f"Could not read ingest JSON: {error}") from error
+    payload = parse_ingest_json(raw)
+    with _acquire_journal_lock(args.journal):
+        _require_regular_journal(args.journal)
+        journal_text, imported, skipped, decisions = build_ingest_transactions(
+            payload,
+            existing_text=args.journal.read_text(encoding="utf-8"),
+            classification_transactions=_load_classification_history(args.journal),
+            classification_rules=_load_classification_rules(args.journal),
+        )
+        if journal_text and not args.preview:
+            _append_validated_and_commit_locked(
+                args.journal,
+                journal_text,
+                f"Ingest {imported} normalized transactions",
+            )
+    for decision in decisions:
+        print(
+            f"Record {decision['record']}: {decision['account']} "
+            f"(source={decision['source']}, confidence={decision['confidence']:.2f})",
+            file=sys.stderr,
+        )
+    print(f"Records ready: {imported}; duplicates skipped: {skipped}", file=sys.stderr)
+    if not journal_text:
+        return 0
+    if args.preview:
+        print(journal_text, end="")
+        print("Preview only; nothing was written.", file=sys.stderr)
+    else:
+        print(f"Appended to {args.journal}")
+    return 0
+
+
 def command_import_csv(args: argparse.Namespace) -> int:
     _ensure_journal(args.journal)
+    _require_regular_journal(args.journal)
     with args.file.open(newline="", encoding=args.encoding) as handle:
         rows = list(csv.DictReader(handle))
-    journal_text, imported, skipped = import_csv_transactions(
-        rows=rows,
-        existing_text=args.journal.read_text(encoding="utf-8"),
-        default_debit=args.debit,
-        credit_account=args.credit,
-        currency=args.currency,
-        date_column=args.date_column,
-        description_column=args.description_column,
-        amount_column=args.amount_column,
-        id_column=args.id_column,
-        installment_column=args.installment_column,
-        category_column=args.category_column,
-        default_installments=args.installments,
-        category_prefix=args.category_prefix,
-        classification_transactions=_load_classification_history(args.journal),
-        classification_rules=_load_classification_rules(args.journal),
-    )
+    with _acquire_journal_lock(args.journal):
+        _require_regular_journal(args.journal)
+        journal_text, imported, skipped = import_csv_transactions(
+            rows=rows,
+            existing_text=args.journal.read_text(encoding="utf-8"),
+            default_debit=args.debit,
+            credit_account=args.credit,
+            currency=args.currency,
+            date_column=args.date_column,
+            description_column=args.description_column,
+            amount_column=args.amount_column,
+            id_column=args.id_column,
+            installment_column=args.installment_column,
+            category_column=args.category_column,
+            default_installments=args.installments,
+            category_prefix=args.category_prefix,
+            classification_transactions=_load_classification_history(args.journal),
+            classification_rules=_load_classification_rules(args.journal),
+        )
+        if journal_text and not args.preview:
+            _append_validated_and_commit_locked(
+                args.journal,
+                journal_text,
+                f"Import {imported} CSV transactions",
+            )
     print(f"Rows ready: {imported}; duplicates skipped: {skipped}", file=sys.stderr)
     if not journal_text:
         return 0
-    return _print_preview_or_append(args, journal_text, f"Import {imported} CSV transactions")
+    if args.preview:
+        print(journal_text, end="")
+        print("Preview only; nothing was written.", file=sys.stderr)
+    else:
+        print(f"Appended to {args.journal}")
+    return 0
 
 
 def command_query(args: argparse.Namespace) -> int:
@@ -1153,6 +1593,13 @@ def _posting_summary(transaction: dict) -> str:
 
 def command_delete(args: argparse.Namespace) -> int:
     _ensure_journal(args.journal)
+    _require_regular_journal(args.journal)
+    with _acquire_journal_lock(args.journal):
+        return _command_delete_locked(args)
+
+
+def _command_delete_locked(args: argparse.Namespace) -> int:
+    _require_regular_journal(args.journal)
     selectors = [args.period, args.begin, args.end, *args.account, *args.description, *args.tag, *args.where]
     if not any(selectors):
         raise ValueError("Deletion requires at least one date, account, description, tag, or raw query filter")
@@ -1193,23 +1640,30 @@ def command_delete(args: argparse.Namespace) -> int:
     for start, end, _ in reversed(spans):
         del lines[start - 1 : end - 1]
     replacement = "".join(lines)
-    original = args.journal.read_text(encoding="utf-8")
-    args.journal.write_text(replacement, encoding="utf-8")
-    validation = _run(["hledger", "-f", str(args.journal), "check"], capture=True)
-    if validation.returncode:
-        args.journal.write_text(original, encoding="utf-8")
-        raise ValueError(validation.stderr.strip() or "Deletion would make the journal invalid")
     descriptions = ", ".join(transaction.get("tdescription", "") for _, _, transaction in spans[:3])
     if len(spans) > 3:
         descriptions += ", ..."
-    _git_commit(args.journal.parent, f"Delete {len(spans)} transaction(s): {descriptions}")
+    _replace_validated_and_commit_locked(
+        args.journal,
+        replacement,
+        f"Delete {len(spans)} transaction(s): {descriptions}",
+    )
     print(f"Deleted {len(spans)} transaction(s). Use 'hfin undo' to restore them.")
     return 0
 
 
 def command_undo(args: argparse.Namespace) -> int:
     _ensure_journal(args.journal)
+    _require_regular_journal(args.journal)
+    with _acquire_journal_lock(args.journal):
+        return _command_undo_locked(args)
+
+
+def _command_undo_locked(args: argparse.Namespace) -> int:
+    _require_regular_journal(args.journal)
     book_dir = args.journal.parent
+    _reject_staged_changes(book_dir)
+    _reject_dirty_journal(args.journal)
     if not (book_dir / ".git").exists():
         raise ValueError("The finance folder is not a Git repository")
     try:
@@ -1260,6 +1714,13 @@ def command_undo(args: argparse.Namespace) -> int:
 
 def command_backup(args: argparse.Namespace) -> int:
     _ensure_journal(args.journal)
+    _require_regular_journal(args.journal)
+    with _acquire_journal_lock(args.journal):
+        return _command_backup_locked(args)
+
+
+def _command_backup_locked(args: argparse.Namespace) -> int:
+    _require_regular_journal(args.journal)
     _git_commit(args.journal.parent, args.message)
     remotes = subprocess.run(["rclone", "listremotes"], text=True, capture_output=True, check=False)
     remote_name = args.remote.split(":", 1)[0] + ":"
@@ -1317,6 +1778,14 @@ def build_parser() -> argparse.ArgumentParser:
     installment_parser.add_argument("--preview", action="store_true", help="Show entries without writing")
     installment_parser.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)
     installment_parser.set_defaults(func=command_installment)
+
+    ingest_parser = subparsers.add_parser(
+        "ingest-json",
+        help="Atomically write agent-normalized fuzzy text, image, or tabular records",
+    )
+    ingest_parser.add_argument("file", help="Normalized JSON file, or - for stdin")
+    ingest_parser.add_argument("--preview", action="store_true", help="Show entries without writing")
+    ingest_parser.set_defaults(func=command_ingest_json)
 
     import_parser = subparsers.add_parser("import-csv", help="Import CSV, optionally splitting rows into installments")
     import_parser.add_argument("file", type=Path)

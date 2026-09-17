@@ -16,6 +16,7 @@ hledger-finance/
 ├── references/
 │   ├── ACCOUNTING.md
 │   ├── CSV.md
+│   ├── INGEST.md
 │   └── QUERY.md
 └── tests/
     └── test_finance.py
@@ -74,6 +75,7 @@ hfin init
 hfin add --date 2026-09-17 --description "全聯買菜" --amount 680 \
   --currency TWD --debit auto --credit assets:cash
 hfin classify --description "Uber Eats"
+hfin ingest-json /tmp/agent-normalized-transactions.json
 hfin query --report transactions --period this-month
 hfin stats --period this-month
 hfin visualize --period this-month
@@ -81,6 +83,16 @@ hfin check
 ```
 
 By default, journal data lives in `~/finance/main.journal`. It remains separate from this source repository.
+
+## Fuzzy and multimodal ingestion
+
+The agent skill accepts natural phrases such as `晚餐1200元`, pasted transaction lists, malformed/headerless tables, and attached receipt or invoice images. The agent extracts financial facts and normalizes them; the CLI validates and writes them atomically:
+
+```bash
+hfin ingest-json /tmp/agent-normalized-transactions.json
+```
+
+A whole batch creates one Git commit and can be reversed with one `hfin undo`. Missing date, TWD currency, or payment source may use audited defaults; unreadable amounts and materially ambiguous transaction directions are never invented. See [`references/INGEST.md`](references/INGEST.md) for the JSON contract and receipt/table extraction policy.
 
 ## Automatic expense categorization
 
