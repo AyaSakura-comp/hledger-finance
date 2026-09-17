@@ -123,10 +123,15 @@ def _reject_control_characters(value: str, label: str) -> None:
         raise ValueError(f"{label} contains unsafe control characters")
 
 
-def _validate_account(account: str) -> None:
+def _validate_account(account: str) -> str:
     _reject_control_characters(account, "Account name")
-    if not account.strip():
-        raise ValueError("Invalid account name")
+    cleaned = account.strip()
+    component = r"\w(?:[\w.' -]*\w)?"
+    if not cleaned or "  " in cleaned or not re.fullmatch(
+        rf"{component}(?::{component})*", cleaned
+    ):
+        raise ValueError("Account name contains unsafe hledger grammar")
+    return cleaned
 
 
 def _validate_text(value: str, label: str) -> str:
@@ -135,6 +140,68 @@ def _validate_text(value: str, label: str) -> str:
     if not cleaned:
         raise ValueError(f"{label} must not be empty")
     return cleaned
+
+
+def _validate_description(value: str) -> str:
+    cleaned = _validate_text(value, "Description")
+    if ";" in cleaned or cleaned[0] in "*!(":
+        raise ValueError("Description contains unsafe hledger grammar")
+    return cleaned
+
+
+def _validate_currency(value: str) -> str:
+    cleaned = _validate_text(value, "Currency")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]*", cleaned):
+        raise ValueError("Currency contains unsafe hledger grammar")
+    return cleaned
+
+
+def _validate_tag(value: str) -> str:
+    cleaned = _validate_text(value, "Tag")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*:[\w.+/-]+", cleaned):
+        raise ValueError("Tag must be one canonical name:value pair")
+    return cleaned
+
+
+def _account_family(account: str) -> str | None:
+    root = account.split(":", 1)[0]
+    return root if root in {"assets", "liabilities", "expenses", "income", "equity"} else None
+
+
+def _is_opening_equity(account: str) -> bool:
+    return account == "equity:opening-balances" or account.startswith(
+        "equity:opening-balances:"
+    )
+
+
+def _validate_kind_accounts(kind: str, debit: str, credit: str, label: str) -> None:
+    debit_family = _account_family(debit)
+    credit_family = _account_family(credit)
+    asset_or_liability = {"assets", "liabilities"}
+    valid = {
+        "expense": debit_family == "expenses" and credit_family in asset_or_liability,
+        "income": debit_family in asset_or_liability and credit_family == "income",
+        "refund": debit_family in asset_or_liability and credit_family == "expenses",
+        "transfer": debit_family in asset_or_liability and credit_family in asset_or_liability,
+    }
+    if kind in valid and not valid[kind]:
+        raise ValueError(f"{label} kind {kind} has invalid debit/credit account families")
+
+
+APPROVED_SOURCE_TAGS = {
+    "source:fuzzy-text",
+    "source:pasted-table",
+    "source:messy-csv",
+    "source:structured-csv",
+    "source:historical-import",
+    "source:receipt-image",
+    "source:invoice-image",
+    "source:pdf",
+    "source:voice-transcript",
+}
+HISTORICAL_SOURCE_TAGS = {"source:structured-csv", "source:historical-import"}
+INGEST_KINDS = {"expense", "income", "transfer", "refund", "opening-balance"}
+_SOURCE_BOUNDARY_SENTINEL = "\x00hfin-source-boundary\x00"
 
 
 BUILTIN_CATEGORY_RULES: tuple[tuple[str, str], ...] = (
@@ -311,22 +378,22 @@ def render_transaction(
     tags: Sequence[str] = (),
     extra_postings: Sequence[tuple[str, Decimal]] = (),
 ) -> str:
-    _validate_account(debit_account)
-    _validate_account(credit_account)
-    description = _validate_text(description, "Description")
-    currency = _validate_text(currency, "Currency")
+    debit_account = _validate_account(debit_account)
+    credit_account = _validate_account(credit_account)
+    description = _validate_description(description)
+    currency = _validate_currency(currency)
     if amount <= 0:
         raise ValueError("Amount must be positive")
     total_credit = amount + sum((value for _, value in extra_postings), Decimal("0"))
     lines = [f"{txn_date.isoformat()} {description}"]
     for tag in tags:
-        lines.append(f"    ; {_validate_text(tag, 'Tag')}")
-    lines.append(f"    {debit_account:<40} {_decimal_text(amount)} {currency}")
+        lines.append(f"    ; {_validate_tag(tag)}")
+    lines.append(f"    {debit_account:<40}  {_decimal_text(amount)} {currency}")
     for account, value in extra_postings:
-        _validate_account(account)
+        account = _validate_account(account)
         if value:
-            lines.append(f"    {account:<40} {_decimal_text(value)} {currency}")
-    lines.append(f"    {credit_account:<40} -{_decimal_text(total_credit)} {currency}")
+            lines.append(f"    {account:<40}  {_decimal_text(value)} {currency}")
+    lines.append(f"    {credit_account:<40}  -{_decimal_text(total_credit)} {currency}")
     return "\n".join(lines) + "\n\n"
 
 
@@ -431,6 +498,450 @@ def _amount_decimal(amount: dict) -> Decimal:
     if "decimalMantissa" in quantity and "decimalPlaces" in quantity:
         return Decimal(quantity["decimalMantissa"]).scaleb(-int(quantity["decimalPlaces"]))
     return Decimal(str(quantity.get("floatingPoint", 0)))
+
+
+def _transaction_tag_values(transaction: dict) -> dict[str, list[str]]:
+    values: defaultdict[str, list[str]] = defaultdict(list)
+    for item in transaction.get("ttags", []) or []:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            values[str(item[0])].append(str(item[1]))
+    return dict(values)
+
+
+def _kind_structure_is_valid(transaction: dict, kind: str) -> bool:
+    entries: list[tuple[str | None, str, Decimal]] = []
+    for posting in transaction.get("tpostings", []):
+        account = str(posting.get("paccount", ""))
+        for amount in posting.get("pamount", []):
+            value = _amount_decimal(amount)
+            if value:
+                entries.append((_account_family(account), account, value))
+    if not entries:
+        return False
+
+    asset_or_liability = {"assets", "liabilities"}
+    if kind == "expense":
+        return (
+            all((family == "expenses" and value > 0) or (family in asset_or_liability and value < 0)
+                for family, _account, value in entries)
+            and any(family == "expenses" for family, _account, _value in entries)
+            and any(family in asset_or_liability for family, _account, _value in entries)
+        )
+    if kind == "income":
+        return (
+            all(
+                (family in asset_or_liability and value > 0)
+                or (family == "expenses" and value > 0)
+                or (family == "income" and value < 0)
+                for family, _account, value in entries
+            )
+            and any(family in asset_or_liability for family, _account, _value in entries)
+            and any(family == "income" for family, _account, _value in entries)
+        )
+    if kind == "refund":
+        return (
+            all(
+                (family in asset_or_liability and value > 0)
+                or family == "expenses"
+                for family, _account, value in entries
+            )
+            and any(family in asset_or_liability for family, _account, _value in entries)
+            and any(family == "expenses" and value < 0 for family, _account, value in entries)
+        )
+    if kind == "transfer":
+        return (
+            all(
+                family in asset_or_liability or (family == "expenses" and value > 0)
+                for family, _account, value in entries
+            )
+            and any(family in asset_or_liability and value > 0 for family, _account, value in entries)
+            and any(family in asset_or_liability and value < 0 for family, _account, value in entries)
+        )
+    if kind == "opening-balance":
+        asset_opening = (
+            all(
+                (family == "assets" and value > 0)
+                or (_is_opening_equity(account) and value < 0)
+                for family, account, value in entries
+            )
+            and any(family == "assets" for family, _account, _value in entries)
+            and any(_is_opening_equity(account) for _family, account, _value in entries)
+        )
+        liability_opening = (
+            all(
+                (_is_opening_equity(account) and value > 0)
+                or (family == "liabilities" and value < 0)
+                for family, account, value in entries
+            )
+            and any(family == "liabilities" for family, _account, _value in entries)
+            and any(_is_opening_equity(account) for _family, account, _value in entries)
+        )
+        return asset_opening or liability_opening
+    return False
+
+
+def _installment_transaction_signature(transaction: dict) -> tuple:
+    tags = _transaction_tag_values(transaction)
+    tag_signature = tuple(
+        sorted((name, tuple(sorted(values))) for name, values in tags.items() if name != "import-id")
+    )
+    posting_signature = []
+    for posting in transaction.get("tpostings", []):
+        amounts = tuple(
+            sorted(
+                (
+                    amount.get("acommodity") or "unitless",
+                    1 if _amount_decimal(amount) > 0 else -1 if _amount_decimal(amount) < 0 else 0,
+                )
+                for amount in posting.get("pamount", [])
+            )
+        )
+        posting_signature.append((str(posting.get("paccount", "")), amounts))
+    return tag_signature, tuple(posting_signature)
+
+
+def _installment_amount_vector(transaction: dict) -> tuple[Decimal, ...]:
+    return tuple(
+        _amount_decimal(amount)
+        for posting in transaction.get("tpostings", [])
+        for amount in posting.get("pamount", [])
+    )
+
+
+def _is_complete_installment_group(transactions: Sequence[dict]) -> bool:
+    parts: list[tuple[str, int, int, date, tuple]] = []
+    for transaction in transactions:
+        description = str(transaction.get("tdescription", "")).strip()
+        match = re.fullmatch(r"(.+?)\s+\[(\d+)/(\d+)\]", description)
+        try:
+            txn_date = date.fromisoformat(str(transaction.get("tdate", "")))
+        except ValueError:
+            return False
+        if not match:
+            return False
+        parts.append(
+            (
+                match.group(1),
+                int(match.group(2)),
+                int(match.group(3)),
+                txn_date,
+                _installment_transaction_signature(transaction),
+            )
+        )
+    bases = {base for base, _index, _total, _date, _signature in parts}
+    totals = {total for _base, _index, total, _date, _signature in parts}
+    signatures = {signature for _base, _index, _total, _date, signature in parts}
+    if len(bases) != 1 or len(totals) != 1 or len(signatures) != 1:
+        return False
+    total = next(iter(totals))
+    by_index = {index: txn_date for _base, index, _total, txn_date, _signature in parts}
+    if total < 2 or len(parts) != total or sorted(by_index) != list(range(1, total + 1)):
+        return False
+    first_date = by_index[1]
+    if not all(by_index[index] == add_months(first_date, index - 1) for index in by_index):
+        return False
+    amount_vectors = [_installment_amount_vector(transaction) for transaction in transactions]
+    if not amount_vectors or len({len(vector) for vector in amount_vectors}) != 1:
+        return False
+    maximum_rounding_remainder = Decimal(total - 1) * Decimal("0.01")
+    return all(
+        max(values) - min(values) <= maximum_rounding_remainder
+        for values in zip(*amount_vectors)
+    )
+
+
+def _date_only_automated_rule_lines(journal_text: str) -> list[int]:
+    matches: list[int] = []
+    in_comment_block = False
+    for index, line in enumerate(journal_text.splitlines(), start=1):
+        if line == _SOURCE_BOUNDARY_SENTINEL:
+            in_comment_block = False
+            continue
+        stripped = line.strip()
+        top_level = line == line.lstrip()
+        if top_level and stripped == "comment":
+            in_comment_block = True
+            continue
+        if top_level and stripped == "end comment":
+            in_comment_block = False
+            continue
+        if in_comment_block or not stripped or stripped.startswith(";"):
+            continue
+        directive = line.split(";", 1)[0].strip()
+        if re.fullmatch(
+            r"=\s*\d{4}(?P<separator>[-/.])\d{1,2}(?P=separator)\d{1,2}",
+            directive,
+        ):
+            matches.append(index)
+    return matches
+
+
+def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
+    """Report semantic import hazards that hledger's balance check cannot detect."""
+    direction = {
+        "expense": {"debit_count": 0, "credit_count": 0, "zero_count": 0, "amounts": defaultdict(Decimal)},
+        "income": {"debit_count": 0, "credit_count": 0, "zero_count": 0, "amounts": defaultdict(Decimal)},
+    }
+    untagged_direction = {
+        "expense": {"debit_count": 0, "credit_count": 0},
+        "income": {"debit_count": 0, "credit_count": 0},
+    }
+    bad_kind_expenses = 0
+    bad_kind_incomes = 0
+    invalid_kinds = 0
+    invalid_structures = 0
+    invalid_sources = 0
+    invalid_import_ids = 0
+    historical_missing_ids = 0
+    historical_invalid_tags = 0
+    historical_invalid_structures = 0
+    import_id_transactions: defaultdict[str, list[dict]] = defaultdict(list)
+    descriptions: defaultdict[str, int] = defaultdict(int)
+
+    for transaction in transactions:
+        description = str(transaction.get("tdescription", "")).strip()
+        if description:
+            descriptions[description] += 1
+        tags = _transaction_tag_values(transaction)
+        kinds = tags.get("kind", [])
+        source_values = tags.get("source", [])
+        import_ids = tags.get("import-id", [])
+        managed = bool(kinds or source_values or import_ids)
+        valid_kind = len(kinds) == 1 and kinds[0] in INGEST_KINDS
+        kind = kinds[0] if valid_kind else None
+        structure_valid = bool(kind and _kind_structure_is_valid(transaction, kind))
+        if managed and not valid_kind:
+            invalid_kinds += 1
+        if managed and not structure_valid:
+            invalid_structures += 1
+
+        valid_source = len(source_values) == 1 and f"source:{source_values[0]}" in APPROVED_SOURCE_TAGS
+        if source_values and not valid_source:
+            invalid_sources += 1
+        valid_id = len(import_ids) == 1 and bool(
+            re.fullmatch(r"[A-Za-z0-9._-]+", import_ids[0])
+        )
+        if import_ids and not valid_id:
+            invalid_import_ids += 1
+        if valid_id:
+            import_id_transactions[import_ids[0]].append(transaction)
+
+        historical = any(f"source:{value}" in HISTORICAL_SOURCE_TAGS for value in source_values)
+        if historical:
+            valid_tags = (
+                valid_source
+                and f"source:{source_values[0]}" in HISTORICAL_SOURCE_TAGS
+                and valid_kind
+                and valid_id
+            )
+            if not import_ids:
+                historical_missing_ids += 1
+            if not valid_tags:
+                historical_invalid_tags += 1
+            if not structure_valid:
+                historical_invalid_structures += 1
+
+        for posting in transaction.get("tpostings", []):
+            account = str(posting.get("paccount", ""))
+            account_family = _account_family(account)
+            if account_family == "expenses":
+                family = "expense"
+            elif account_family == "income":
+                family = "income"
+            else:
+                continue
+            for amount in posting.get("pamount", []):
+                value = _amount_decimal(amount)
+                currency = amount.get("acommodity") or "unitless"
+                direction[family]["amounts"][currency] += value
+                if value > 0:
+                    direction[family]["debit_count"] += 1
+                    if kind is None:
+                        untagged_direction[family]["debit_count"] += 1
+                    if kind == "income" and family == "income":
+                        bad_kind_incomes += 1
+                elif value < 0:
+                    direction[family]["credit_count"] += 1
+                    if kind is None:
+                        untagged_direction[family]["credit_count"] += 1
+                    if kind == "expense" and family == "expense":
+                        bad_kind_expenses += 1
+                else:
+                    direction[family]["zero_count"] += 1
+
+    findings: list[dict] = []
+    date_only_rules = _date_only_automated_rule_lines(journal_text)
+    if date_only_rules:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "date-only-automated-posting",
+                "count": len(date_only_rules),
+                "lines": date_only_rules[:20],
+                "message": "Date-only '=' directives are automated posting rules, not opening balances; use dated balanced transactions.",
+            }
+        )
+
+    heuristic_specs = (
+        ("expense", "credit_count", "debit_count", "mostly-expenses-credit-normal", "contra-only-expenses"),
+        ("income", "debit_count", "credit_count", "mostly-income-debit-normal", "contra-only-income"),
+    )
+    for family, contra_key, normal_key, mixed_code, contra_code in heuristic_specs:
+        values = untagged_direction[family]
+        contra_count = values[contra_key]
+        normal_count = values[normal_key]
+        if contra_count >= 100 and normal_count > 0 and contra_count >= normal_count * 20:
+            findings.append(
+                {
+                    "severity": "critical",
+                    "code": mixed_code,
+                    "count": contra_count,
+                    "normal_count": normal_count,
+                    "message": f"Untagged {family} postings are overwhelmingly reversed relative to normal postings; inspect the import sign mapping.",
+                }
+            )
+        elif contra_count >= 10 and normal_count == 0:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "code": contra_code,
+                    "count": contra_count,
+                    "message": f"This journal contains only untagged contra {family} postings; this may be legitimate refunds/reversals, but should be reviewed.",
+                }
+            )
+
+    if invalid_kinds:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "tagged-transaction-invalid-kind",
+                "count": invalid_kinds,
+                "message": "Managed transactions need exactly one supported kind tag.",
+            }
+        )
+    if invalid_structures:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "tagged-transaction-invalid-structure",
+                "count": invalid_structures,
+                "message": "Managed transaction postings do not match the account families and direction required by their kind.",
+            }
+        )
+    if invalid_sources:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "tagged-transaction-invalid-source",
+                "count": invalid_sources,
+                "message": "When source tags are present, exactly one approved source is required.",
+            }
+        )
+    if invalid_import_ids:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "tagged-transaction-invalid-import-id",
+                "count": invalid_import_ids,
+                "message": "When import-id tags are present, exactly one canonical import ID is required.",
+            }
+        )
+    colliding_ids = sorted(
+        import_id
+        for import_id, grouped_transactions in import_id_transactions.items()
+        if len(grouped_transactions) > 1
+        and not _is_complete_installment_group(grouped_transactions)
+    )
+    if colliding_ids:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "duplicate-import-id",
+                "count": len(colliding_ids),
+                "import_ids": colliding_ids[:20],
+                "message": "Import IDs may repeat only across one complete, uniquely numbered installment group.",
+            }
+        )
+
+    if bad_kind_expenses:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "tagged-expense-has-credit-posting",
+                "count": bad_kind_expenses,
+                "message": "Transactions tagged kind:expense contain credit postings to expenses.",
+            }
+        )
+    if bad_kind_incomes:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "tagged-income-has-debit-posting",
+                "count": bad_kind_incomes,
+                "message": "Transactions tagged kind:income contain debit postings to income.",
+            }
+        )
+    if historical_missing_ids:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "historical-import-missing-id",
+                "count": historical_missing_ids,
+                "message": "Historical/structured import transactions need stable import-id tags for idempotent retries.",
+            }
+        )
+    if historical_invalid_tags:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "historical-import-invalid-tags",
+                "count": historical_invalid_tags,
+                "message": "Historical transactions need exactly one approved historical source, kind, and canonical import-id tag.",
+            }
+        )
+    if historical_invalid_structures:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "historical-import-invalid-structure",
+                "count": historical_invalid_structures,
+                "message": "Historical transaction postings do not match the account families and direction required by their kind.",
+            }
+        )
+    if transactions and descriptions:
+        repeated_description, repeated_count = max(descriptions.items(), key=lambda item: item[1])
+        if repeated_count >= 10 and repeated_count * 2 > len(transactions):
+            findings.append(
+                {
+                    "severity": "info",
+                    "code": "generic-description-dominates",
+                    "count": repeated_count,
+                    "description": repeated_description,
+                    "message": "One description dominates the journal; verify that imports preserve the actual merchant or purpose.",
+                }
+            )
+
+    serialized_direction = {}
+    for family, values in direction.items():
+        serialized_direction[family] = {
+            "debit_count": values["debit_count"],
+            "credit_count": values["credit_count"],
+            "zero_count": values["zero_count"],
+            "accounting_totals": {
+                currency: _decimal_text(amount)
+                for currency, amount in sorted(values["amounts"].items())
+            },
+        }
+    critical_count = sum(1 for finding in findings if finding["severity"] == "critical")
+    warning_count = sum(1 for finding in findings if finding["severity"] == "warning")
+    return {
+        "ok": critical_count == 0,
+        "transaction_count": len(transactions),
+        "critical_count": critical_count,
+        "warning_count": warning_count,
+        "direction_summary": serialized_direction,
+        "findings": findings,
+    }
 
 
 def compute_stats(transactions: Sequence[dict]) -> dict:
@@ -978,13 +1489,57 @@ def _validate_import_id(value: object, label: str) -> str:
     return import_id
 
 
+def _import_ids_in_tag_comment(comment: str) -> set[str]:
+    import_ids: set[str] = set()
+    for item in comment.split(","):
+        match = re.fullmatch(r"\s*import-id:([A-Za-z0-9._-]+)\s*", item)
+        if match:
+            import_ids.add(match.group(1))
+    return import_ids
+
+
 def _existing_import_ids(journal_text: str) -> set[str]:
-    return set(
-        re.findall(
-            r"(?m)^\s*;\s*import-id:([A-Za-z0-9._-]+)\s*$",
-            journal_text,
-        )
+    """Read only canonical transaction tags, never detached or posting comments."""
+    import_ids: set[str] = set()
+    in_transaction = False
+    transaction_comments_open = False
+    in_comment_block = False
+    transaction_header = re.compile(
+        r"^\d{4}(?P<separator>[-/.])\d{1,2}(?P=separator)\d{1,2}(?:=\S+)?(?:\s|$)"
     )
+    for line in journal_text.splitlines():
+        if line == _SOURCE_BOUNDARY_SENTINEL:
+            in_comment_block = False
+            in_transaction = False
+            transaction_comments_open = False
+            continue
+        stripped = line.strip()
+        top_level = line == line.lstrip()
+        if top_level and stripped == "comment":
+            in_comment_block = True
+            in_transaction = False
+            transaction_comments_open = False
+            continue
+        if top_level and stripped == "end comment":
+            in_comment_block = False
+            continue
+        if in_comment_block:
+            continue
+        if transaction_header.match(line):
+            in_transaction = True
+            transaction_comments_open = True
+            if ";" in line:
+                import_ids.update(_import_ids_in_tag_comment(line.split(";", 1)[1]))
+            continue
+        if not stripped or (line and not line[0].isspace()):
+            in_transaction = False
+            transaction_comments_open = False
+            continue
+        if in_transaction and transaction_comments_open and re.match(r"^\s+;", line):
+            import_ids.update(_import_ids_in_tag_comment(line.lstrip()[1:]))
+        elif in_transaction:
+            transaction_comments_open = False
+    return import_ids
 
 
 def build_ingest_transactions(
@@ -1040,7 +1595,9 @@ def build_ingest_transactions(
             f"Ingest record {index} import_id",
         )
 
-        description = _ingest_string(record["description"], f"Ingest record {index} description")
+        description = _validate_description(
+            _ingest_string(record["description"], f"Ingest record {index} description")
+        )
         if isinstance(record["amount"], bool) or not isinstance(record["amount"], (str, int, float, Decimal)):
             raise ValueError(f"Ingest record {index} amount must be a decimal string or number")
         try:
@@ -1054,9 +1611,9 @@ def build_ingest_transactions(
 
         kind_value = record.get("kind", defaults.get("kind"))
         kind = _ingest_string(kind_value, f"Ingest record {index} kind") if kind_value is not None else None
-        if kind not in {"expense", "income", "transfer", "refund"}:
+        if kind not in INGEST_KINDS:
             raise ValueError(
-                f"Ingest record {index} kind must be expense, income, transfer, or refund"
+                f"Ingest record {index} kind must be expense, income, transfer, refund, or opening-balance"
             )
         has_date = "date" in record or "date" in defaults
         raw_date = record.get("date", defaults.get("date"))
@@ -1065,9 +1622,11 @@ def build_ingest_transactions(
             txn_date = date.fromisoformat(date_text)
         else:
             txn_date = today
-        currency = _ingest_string(
-            record.get("currency", defaults.get("currency", "TWD")),
-            f"Ingest record {index} currency",
+        currency = _validate_currency(
+            _ingest_string(
+                record.get("currency", defaults.get("currency", "TWD")),
+                f"Ingest record {index} currency",
+            )
         )
         has_debit = "debit" in record or "debit" in defaults
         has_credit = "credit" in record or "credit" in defaults
@@ -1095,6 +1654,24 @@ def build_ingest_transactions(
             )
             if debit == "auto":
                 raise ValueError(f"Ingest record {index} kind {kind} cannot use debit auto")
+        if debit != "auto":
+            debit = _validate_account(debit)
+        credit = _validate_account(credit)
+        if kind == "opening-balance":
+            debit_is_asset = debit == "assets" or debit.startswith("assets:")
+            debit_is_opening_equity = _is_opening_equity(debit)
+            credit_is_liability = credit == "liabilities" or credit.startswith("liabilities:")
+            credit_is_opening_equity = _is_opening_equity(credit)
+            if not (
+                (debit_is_asset and credit_is_opening_equity)
+                or (debit_is_opening_equity and credit_is_liability)
+            ):
+                raise ValueError(
+                    f"Ingest record {index} opening asset must debit assets and credit equity:opening-balances; "
+                    "opening liability must debit equity:opening-balances and credit liabilities"
+                )
+        elif debit != "auto":
+            _validate_kind_accounts(kind, debit, credit, f"Ingest record {index}")
 
         count_value = record.get("installments", defaults.get("installments", 1))
         if isinstance(count_value, bool) or not isinstance(count_value, int) or count_value < 1:
@@ -1106,10 +1683,20 @@ def build_ingest_transactions(
             raise ValueError(f"Ingest record {index} has an invalid fee") from error
         if not fee.is_finite():
             raise ValueError(f"Ingest record {index} fee must be finite")
-        fee_account = _ingest_string(
-            record.get("fee_account", defaults.get("fee_account", "expenses:fees")),
-            f"Ingest record {index} fee_account",
+        if kind == "opening-balance" and (count != 1 or fee != 0):
+            raise ValueError(
+                f"Ingest record {index} opening-balance requires installments=1 and fees=0"
+            )
+        fee_account = _validate_account(
+            _ingest_string(
+                record.get("fee_account", defaults.get("fee_account", "expenses:fees")),
+                f"Ingest record {index} fee_account",
+            )
         )
+        if fee < 0:
+            raise ValueError(f"Ingest record {index} fee must not be negative")
+        if fee and _account_family(fee_account) != "expenses":
+            raise ValueError(f"Ingest record {index} fee_account must be an expenses account")
 
         default_tags = defaults.get("tags", [])
         record_tags = record.get("tags", [])
@@ -1117,7 +1704,7 @@ def build_ingest_transactions(
             raise ValueError(f"Ingest record {index} tags must be lists")
         tags = list(
             dict.fromkeys(
-                _ingest_string(tag, f"Ingest record {index} tag")
+                _validate_tag(_ingest_string(tag, f"Ingest record {index} tag"))
                 for tag in [*default_tags, *record_tags]
             )
         )
@@ -1127,23 +1714,32 @@ def build_ingest_transactions(
             tags.append("inferred:payment-account")
         if "currency" not in record and "currency" not in defaults:
             tags.append("inferred:currency")
-        approved_sources = {
-            "source:fuzzy-text",
-            "source:pasted-table",
-            "source:messy-csv",
-            "source:receipt-image",
-            "source:invoice-image",
-            "source:pdf",
-            "source:voice-transcript",
-        }
         source_tags = [tag for tag in tags if tag.startswith("source:")]
-        if len(source_tags) != 1 or source_tags[0] not in approved_sources:
+        if len(source_tags) != 1 or source_tags[0] not in APPROVED_SOURCE_TAGS:
             raise ValueError(
                 f"Ingest record {index} requires exactly one approved source tag"
+            )
+        reserved_tags = [
+            tag for tag in tags if tag.startswith("kind:") or tag.startswith("import-id:")
+        ]
+        if reserved_tags:
+            raise ValueError(
+                f"Ingest record {index} uses reserved tag {reserved_tags[0]!r}; use kind/import_id fields"
+            )
+        if source_tags[0] in HISTORICAL_SOURCE_TAGS and not import_id:
+            raise ValueError(
+                f"Ingest record {index} historical imports require import_id"
+            )
+        if source_tags[0] in HISTORICAL_SOURCE_TAGS and (
+            debit == "auto" or any(tag.startswith("inferred:") for tag in tags)
+        ):
+            raise ValueError(
+                f"Ingest record {index} historical imports require explicit date, currency, and accounts"
             )
         if import_id and import_id in seen_ids:
             skipped += 1
             continue
+        tags.append(f"kind:{kind}")
         if import_id:
             tags.append(f"import-id:{import_id}")
 
@@ -1156,6 +1752,8 @@ def build_ingest_transactions(
             debit = str(decision["account"])
         else:
             decision = {"account": debit, "source": "explicit", "confidence": 1.0, "matched": description}
+        if kind != "opening-balance":
+            _validate_kind_accounts(kind, debit, credit, f"Ingest record {index}")
         decisions.append({"record": index, "description": description, **decision})
         output.append(
             render_installments(
@@ -1188,7 +1786,7 @@ def import_csv_transactions(
     date_column: str,
     description_column: str,
     amount_column: str,
-    id_column: str | None = None,
+    id_column: str,
     installment_column: str | None = None,
     category_column: str | None = None,
     default_installments: int = 1,
@@ -1196,41 +1794,64 @@ def import_csv_transactions(
     classification_transactions: Sequence[dict] = (),
     classification_rules: Sequence[dict[str, str]] = (),
 ) -> tuple[str, int, int]:
+    if default_debit != "auto":
+        default_debit = _validate_account(default_debit)
+        if _account_family(default_debit) != "expenses":
+            raise ValueError("CSV fallback debit must be an expenses account")
+    category_prefix = _validate_account(category_prefix)
+    if _account_family(category_prefix) != "expenses":
+        raise ValueError("CSV category prefix must be in the expenses account family")
+    credit_account = _validate_account(credit_account)
+    if _account_family(credit_account) not in {"assets", "liabilities"}:
+        raise ValueError("CSV credit must be an asset or liability account")
+    currency = _validate_currency(currency)
+
     output: list[str] = []
     imported = 0
     skipped = 0
     seen_ids = _existing_import_ids(existing_text)
     for index, row in enumerate(rows, start=2):
         import_id = _validate_import_id(
-            (row.get(id_column, "") if id_column else ""),
+            row.get(id_column, ""),
             f"CSV row {index} import ID",
         )
-        if import_id and import_id in seen_ids:
-            skipped += 1
-            continue
+        if not import_id:
+            raise ValueError(f"CSV row {index} requires a non-empty import ID")
         try:
             txn_date = date.fromisoformat(row[date_column].strip())
-            description = _validate_text(row[description_column], "Description")
+            description = _validate_description(row[description_column])
             amount = Decimal(row[amount_column].strip())
+            if not amount.is_finite():
+                raise ValueError("amount must be finite")
             if amount <= 0:
                 raise ValueError(
                     "amount must be a positive expense amount; split income/refunds or normalize direction first"
                 )
-        except (KeyError, ValueError, InvalidOperation) as error:
+        except (KeyError, AttributeError, ValueError, InvalidOperation) as error:
             raise ValueError(f"Invalid CSV row {index}: {error}") from error
         count_text = (row.get(installment_column, "") if installment_column else "").strip()
-        count = int(count_text) if count_text else default_installments
+        try:
+            count = int(count_text) if count_text else default_installments
+        except ValueError as error:
+            raise ValueError(f"Invalid installment count on CSV row {index}") from error
         if count < 1:
             raise ValueError(f"Invalid installment count on CSV row {index}")
         category = (row.get(category_column, "") if category_column else "").strip()
         debit = f"{category_prefix}:{category}" if category else default_debit
+        if debit != "auto":
+            debit = _validate_account(debit)
+            if _account_family(debit) != "expenses":
+                raise ValueError(f"CSV row {index} debit must be an expenses account")
+        if import_id in seen_ids:
+            skipped += 1
+            continue
         if debit == "auto":
             debit = classify_description(
                 description,
                 transactions=classification_transactions,
                 rules=classification_rules,
             )["account"]
-        tags = [f"import-id:{import_id}"] if import_id else []
+        tags = ["source:structured-csv", "kind:expense", f"import-id:{import_id}"]
         output.append(
             render_installments(
                 start=txn_date,
@@ -1263,8 +1884,15 @@ def _combined_journal_text(existing: str, addition: str) -> str:
     return existing + separator + addition
 
 
-def _validate_journal_text(text: str) -> None:
-    with tempfile.NamedTemporaryFile("w", suffix=".journal", encoding="utf-8", delete=False) as handle:
+def _validate_journal_text(text: str, *, base_dir: Path | None = None) -> None:
+    with tempfile.NamedTemporaryFile(
+        "w",
+        dir=base_dir,
+        prefix=".hfin-candidate-",
+        suffix=".tmp",
+        encoding="utf-8",
+        delete=False,
+    ) as handle:
         handle.write(text)
         candidate = Path(handle.name)
     try:
@@ -1277,7 +1905,10 @@ def _validate_journal_text(text: str) -> None:
 
 def _validate_candidate(journal: Path, addition: str) -> None:
     existing = journal.read_text(encoding="utf-8") if journal.exists() else ""
-    _validate_journal_text(_combined_journal_text(existing, addition))
+    _validate_journal_text(
+        _combined_journal_text(existing, addition),
+        base_dir=journal.parent,
+    )
 
 
 def _atomic_replace_text(path: Path, text: str) -> None:
@@ -1371,7 +2002,7 @@ def append_validated(journal: Path, addition: str) -> None:
         _require_regular_journal(journal)
         existing = journal.read_text(encoding="utf-8")
         candidate = _combined_journal_text(existing, addition)
-        _validate_journal_text(candidate)
+        _validate_journal_text(candidate, base_dir=journal.parent)
         _atomic_replace_text(journal, candidate)
 
 
@@ -1390,7 +2021,7 @@ def _replace_validated_and_commit_locked(journal: Path, replacement: str, messag
     _reject_staged_changes(journal.parent)
     _reject_dirty_journal(journal)
     existing = journal.read_text(encoding="utf-8")
-    _validate_journal_text(replacement)
+    _validate_journal_text(replacement, base_dir=journal.parent)
     _atomic_replace_text(journal, replacement)
     try:
         _git_commit(journal.parent, message, paths=[journal])
@@ -1512,6 +2143,21 @@ def command_installment(args: argparse.Namespace) -> int:
     return _print_preview_or_append(args, transaction, f"Add {args.count} installments: {args.description}")
 
 
+def _read_active_journal_text(journal: Path) -> str:
+    result = _run(["hledger", "-f", str(journal), "files"], capture=True)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "Could not list active journal files")
+    source_texts: list[str] = []
+    for filename in result.stdout.splitlines():
+        if not filename.strip():
+            continue
+        try:
+            source_texts.append(Path(filename).read_text(encoding="utf-8"))
+        except OSError as error:
+            raise ValueError(f"Could not read journal source {filename}: {error}") from error
+    return f"\n{_SOURCE_BOUNDARY_SENTINEL}\n".join(source_texts)
+
+
 def command_ingest_json(args: argparse.Namespace) -> int:
     _ensure_journal(args.journal)
     _require_regular_journal(args.journal)
@@ -1524,7 +2170,7 @@ def command_ingest_json(args: argparse.Namespace) -> int:
         _require_regular_journal(args.journal)
         journal_text, imported, skipped, decisions = build_ingest_transactions(
             payload,
-            existing_text=args.journal.read_text(encoding="utf-8"),
+            existing_text=_read_active_journal_text(args.journal),
             classification_transactions=_load_classification_history(args.journal),
             classification_rules=_load_classification_rules(args.journal),
         )
@@ -1560,7 +2206,7 @@ def command_import_csv(args: argparse.Namespace) -> int:
         _require_regular_journal(args.journal)
         journal_text, imported, skipped = import_csv_transactions(
             rows=rows,
-            existing_text=args.journal.read_text(encoding="utf-8"),
+            existing_text=_read_active_journal_text(args.journal),
             default_debit=args.debit,
             credit_account=args.credit,
             currency=args.currency,
@@ -1610,6 +2256,26 @@ def command_query(args: argparse.Namespace) -> int:
     if args.show_command:
         print(shlex.join(command), file=sys.stderr)
     return subprocess.run(command, check=False).returncode
+
+
+def command_audit(args: argparse.Namespace) -> int:
+    _ensure_journal(args.journal)
+    _require_regular_journal(args.journal)
+    with _acquire_journal_lock(args.journal):
+        _require_regular_journal(args.journal)
+        active_journal_text = _read_active_journal_text(args.journal)
+        result = _run(
+            ["hledger", "-f", str(args.journal), "print", "--output-format=json"],
+            capture=True,
+        )
+        if result.returncode:
+            raise ValueError(result.stderr.strip() or "Could not read journal for audit")
+        transactions = json.loads(result.stdout)
+    report = audit_journal(transactions, active_journal_text)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    if report["critical_count"] or (args.strict and report["warning_count"]):
+        return 2
+    return 0
 
 
 def command_stats(args: argparse.Namespace) -> int:
@@ -1923,7 +2589,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser.add_argument("--date-column", default="date")
     import_parser.add_argument("--description-column", default="description")
     import_parser.add_argument("--amount-column", default="amount")
-    import_parser.add_argument("--id-column")
+    import_parser.add_argument("--id-column", required=True)
     import_parser.add_argument("--installment-column")
     import_parser.add_argument("--category-column")
     import_parser.add_argument("--category-prefix", default="expenses")
@@ -1975,6 +2641,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     check_parser = subparsers.add_parser("check", help="Validate the journal")
     check_parser.set_defaults(func=command_check)
+
+    audit_parser = subparsers.add_parser(
+        "audit",
+        help="Detect semantic sign, opening-balance, and historical-import hazards",
+    )
+    audit_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Also return a failure status when warnings are present",
+    )
+    audit_parser.set_defaults(func=command_audit)
 
     delete_parser = subparsers.add_parser("delete", help="Delete matching transactions after token confirmation")
     delete_parser.add_argument("--period")

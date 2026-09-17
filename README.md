@@ -17,6 +17,7 @@ hledger-finance/
 │   ├── ACCOUNTING.md
 │   ├── CSV.md
 │   ├── INGEST.md
+│   ├── HISTORICAL_IMPORT.md
 │   └── QUERY.md
 └── tests/
     └── test_finance.py
@@ -80,6 +81,7 @@ hfin query --report transactions --period this-month
 hfin stats --period this-month
 hfin visualize --period this-month
 hfin check
+hfin audit --strict
 ```
 
 By default, journal data lives in `~/finance/main.journal`. It remains separate from this source repository.
@@ -93,6 +95,10 @@ hfin ingest-json /tmp/agent-normalized-transactions.json
 ```
 
 A whole batch creates one Git commit and can be reversed with one `hfin undo`. Missing date, TWD currency, or payment source may use audited defaults; unreadable amounts and materially ambiguous transaction directions are never invented. See [`references/INGEST.md`](references/INGEST.md) for the JSON contract and receipt/table extraction policy.
+
+## Historical CSV and app migration
+
+Do not translate an existing export by copying signed amounts into raw hledger postings. Profile the source convention, normalize positive magnitudes with explicit semantic kinds, require stable IDs, keep real merchant descriptions, and represent opening balances as dated balanced transactions—not `=` automated posting rules. Run the complete migration against an isolated journal, reconcile control totals by kind/currency, then require both `hfin check` and `hfin audit --strict` before production import. See [`references/HISTORICAL_IMPORT.md`](references/HISTORICAL_IMPORT.md).
 
 ## Automatic expense categorization
 

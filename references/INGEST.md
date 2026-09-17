@@ -42,7 +42,7 @@ The top-level value may be a transaction array or an object containing shared `d
 
 Supported default fields:
 
-- `kind`: required for every resolved record; `expense`, `income`, `transfer`, or `refund`
+- `kind`: required for every resolved record; `expense`, `income`, `transfer`, `refund`, or `opening-balance`
 - `date`: ISO `YYYY-MM-DD`
 - `currency`: hledger commodity, default `TWD`
 - `debit`: account or `auto`, default `auto`
@@ -59,11 +59,20 @@ Each transaction requires:
 
 Each transaction may override any default and may add:
 
-- `import_id`: stable non-secret ID containing only ASCII letters, digits, `.`, `_`, and `-`; canonical tag duplicates already in the journal are skipped
+- `import_id`: stable non-secret ID containing only ASCII letters, digits, `.`, `_`, and `-`; canonical tag duplicates already in the journal are skipped. It is mandatory for `source:structured-csv` and `source:historical-import`.
+
+The CLI appends a canonical `kind:*` tag and converts `import_id` to `import-id:*`. These prefixes are reserved: do not place `kind:*` or `import-id:*` directly in `tags`.
 
 Unknown fields, duplicate JSON object keys, and non-finite JSON numbers (`NaN`/`Infinity`) are rejected instead of silently ignored. Decimal JSON literals are parsed directly as decimal values rather than binary floats, preserving financial precision. This catches agent-generated typos such as `ammount` and ambiguous payloads containing two `amount` keys. Descriptions, dates, currencies, accounts, tags, fee accounts, and import IDs must use their documented JSON string types; `null`, booleans, containers, empty required strings, terminal control characters, and non-finite decimal amounts/fees are rejected. `installments` must be a JSON integer of at least one; booleans and fractional numbers are rejected.
 
-`kind: expense` permits `debit: auto` and controlled payment-source defaults. Every non-expense kind requires explicit `debit` and `credit` accounts and cannot use `debit: auto`; this prevents income, refunds, and transfers from silently becoming expenses.
+`kind: expense` permits `debit: auto` and controlled payment-source defaults. Every non-expense kind requires explicit `debit` and `credit` accounts and cannot use `debit: auto`; this prevents income, refunds, transfers, and opening balances from silently becoming expenses.
+
+For opening balances, use ordinary dated balanced transactions—never hledger's `=` automated-posting syntax:
+
+- positive asset: debit the asset, credit `equity:opening-balances`;
+- opening liability/debt: debit `equity:opening-balances`, credit the liability.
+
+For bulk existing-data migration, also follow [HISTORICAL_IMPORT.md](HISTORICAL_IMPORT.md). Source signs are display conventions, not hledger posting directions.
 
 ## Controlled inference
 
@@ -81,10 +90,14 @@ Always include exactly one approved source tag:
 - `source:fuzzy-text`
 - `source:pasted-table`
 - `source:messy-csv`
+- `source:structured-csv` (stable known-schema imports; requires `import_id`)
+- `source:historical-import` (app/journal migrations; requires `import_id`)
 - `source:receipt-image`
 - `source:invoice-image`
 - `source:pdf`
 - `source:voice-transcript`
+
+On the `ingest-json` path, `source:structured-csv` and `source:historical-import` require explicit date, currency, debit account, and credit account; they reject `auto` categories and `inferred:*` defaults. The separate positive-expense-only `import-csv` command is the sole exception: it may classify a missing expense category before rendering because it fixes `kind:expense`, validates one explicit payment account, and requires a stable ID for every row. Use `source:messy-csv` only for a small ad-hoc fuzzy extraction, not to bypass historical-migration safeguards.
 
 Do not infer a numeric amount from incomplete digits. Ask one focused question when:
 

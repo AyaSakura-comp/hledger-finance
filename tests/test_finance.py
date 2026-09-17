@@ -22,6 +22,7 @@ from scripts.finance import (  # noqa: E402
     _append_validated_and_commit,
     _axis_number,
     _composition_entries,
+    audit_journal,
     _dashboard_presentation,
     _require_regular_journal,
     _chart_amount,
@@ -37,6 +38,7 @@ from scripts.finance import (  # noqa: E402
     parse_period,
     render_dashboard_png,
     render_installments,
+    render_transaction,
     split_amount,
 )
 
@@ -92,6 +94,46 @@ class InstallmentTests(unittest.TestCase):
         self.assertIn("2026-12-31 Phone [3/3]", journal)
         self.assertIn("expenses:fees", journal)
         self.assertIn("-35.34 TWD", journal)
+
+
+class RenderingSafetyTests(unittest.TestCase):
+    def test_render_transaction_rejects_hledger_grammar_in_text_fields(self):
+        cases = [
+            ({"description": "! Cleared-looking expense"}, "Description"),
+            ({"description": "Lunch ; kind:income"}, "Description"),
+            ({"debit_account": "(expenses:food)"}, "Account"),
+            ({"debit_account": "expenses:food  999 USD"}, "Account"),
+            ({"credit_account": "assets:cash ; comment"}, "Account"),
+            ({"currency": "TWD ; kind:income"}, "Currency"),
+            ({"tags": ["project:trip, kind:income"]}, "Tag"),
+            ({"tags": ["note:x; import-id:forged"]}, "Tag"),
+        ]
+        base = {
+            "txn_date": date(2026, 1, 1),
+            "description": "Lunch",
+            "debit_account": "expenses:food",
+            "credit_account": "assets:cash",
+            "amount": Decimal("100"),
+            "currency": "TWD",
+            "tags": ["source:fuzzy-text"],
+        }
+        for changes, label in cases:
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(ValueError, label):
+                    render_transaction(**{**base, **changes})
+
+    def test_render_transaction_accepts_safe_unicode_and_punctuation(self):
+        journal = render_transaction(
+            date(2026, 1, 1),
+            "全聯-台北店 42",
+            "expenses:餐飲-外食",
+            "assets:銀行帳戶",
+            Decimal("100"),
+            "TWD",
+            tags=["project:台北旅行"],
+        )
+        self.assertIn("全聯-台北店 42", journal)
+        self.assertIn("; project:台北旅行", journal)
 
 
 class QueryTests(unittest.TestCase):
@@ -516,6 +558,112 @@ class FuzzyIngestTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "kind|amount|source"):
             build_ingest_transactions(payload, existing_text=existing)
 
+    def test_batch_deduplicates_canonical_import_id_on_transaction_header(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "expense",
+                    "description": "Receipt dinner",
+                    "amount": "1200",
+                    "import_id": "receipt-inline",
+                    "tags": ["source:receipt-image"],
+                }
+            ]
+        }
+        existing = (
+            "2026-09-17 Old ; import-id:receipt-inline\n"
+            "    expenses:food  1 TWD\n"
+            "    assets:cash\n"
+        )
+        journal_text, imported, skipped, _ = build_ingest_transactions(
+            payload, existing_text=existing
+        )
+        self.assertEqual(journal_text, "")
+        self.assertEqual((imported, skipped), (0, 1))
+
+    def test_batch_deduplicates_valid_comma_separated_transaction_tags(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "expense",
+                    "description": "Receipt dinner",
+                    "amount": "1200",
+                    "import_id": "receipt-inline",
+                    "tags": ["source:receipt-image"],
+                }
+            ]
+        }
+        existing_variants = (
+            "2026-09-17 Old ; project:x, import-id:receipt-inline\n"
+            "    expenses:food  1 TWD\n"
+            "    assets:cash\n",
+            "2026/9/17 Old ; project:x, import-id:receipt-inline\n"
+            "    expenses:food  1 TWD\n"
+            "    assets:cash\n",
+            "2026-09-17 Old\n"
+            "    ; project:x, import-id:receipt-inline\n"
+            "    expenses:food  1 TWD\n"
+            "    assets:cash\n",
+            "2026-09-16 Account named comment\n"
+            "    comment\n"
+            "    assets:cash  -1 TWD\n"
+            "2026-09-17 Old ; import-id:receipt-inline\n"
+            "    expenses:food  1 TWD\n"
+            "    assets:cash\n",
+        )
+        for existing in existing_variants:
+            with self.subTest(existing=existing):
+                journal_text, imported, skipped, _ = build_ingest_transactions(
+                    payload, existing_text=existing
+                )
+                self.assertEqual(journal_text, "")
+                self.assertEqual((imported, skipped), (0, 1))
+
+    def test_batch_ignores_detached_and_noncanonical_import_id_comments(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "expense",
+                    "description": "Receipt dinner",
+                    "amount": "1200",
+                    "import_id": "receipt-inline",
+                    "tags": ["source:receipt-image"],
+                }
+            ]
+        }
+        existing_variants = (
+            "; import-id:receipt-inline\n\n"
+            "2026-09-17 Old\n"
+            "    expenses:food  1 TWD\n"
+            "    assets:cash\n",
+            "2026-09-17 Old ; import-id:receipt-inline/forged\n"
+            "    expenses:food  1 TWD\n"
+            "    assets:cash\n",
+            "2026-09-17 Old\n"
+            "    ; note:x import-id:receipt-inline\n"
+            "    expenses:food  1 TWD\n"
+            "    assets:cash\n",
+            "2026-09-17 Old\n"
+            "    expenses:food  1 TWD ; import-id:receipt-inline\n"
+            "    assets:cash\n",
+            "2026-09-17 Old\n"
+            "    expenses:food  1 TWD\n"
+            "    ; import-id:receipt-inline\n"
+            "    assets:cash\n",
+            "comment\n"
+            "2026-09-17 Old ; import-id:receipt-inline\n"
+            "    expenses:food  1 TWD\n"
+            "    assets:cash\n"
+            "end comment\n",
+        )
+        for existing in existing_variants:
+            with self.subTest(existing=existing):
+                journal_text, imported, skipped, _ = build_ingest_transactions(
+                    payload, existing_text=existing
+                )
+                self.assertEqual((imported, skipped), (1, 0))
+                self.assertIn("; import-id:receipt-inline", journal_text)
+
     def test_batch_is_idempotent_when_import_id_already_exists(self):
         payload = {
             "defaults": {
@@ -608,6 +756,203 @@ class FuzzyIngestTests(unittest.TestCase):
         self.assertIn("早餐", text)
         self.assertIn("晚餐", text)
         self.assertEqual(int(after), int(before) + 1)
+
+    def test_historical_import_requires_a_stable_import_id(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "expense",
+                    "date": "2024-01-02",
+                    "description": "Historical lunch",
+                    "amount": "120",
+                    "tags": ["source:historical-import"],
+                }
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "historical imports require import_id"):
+            build_ingest_transactions(payload, existing_text="")
+
+    def test_historical_import_rejects_inferred_core_fields(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "expense",
+                    "description": "Historical lunch",
+                    "amount": "120",
+                    "import_id": "legacy-lunch",
+                    "tags": ["source:historical-import"],
+                }
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "explicit date, currency, and accounts"):
+            build_ingest_transactions(payload, existing_text="")
+
+    def test_historical_import_requires_explicit_expense_category(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "expense",
+                    "date": "2024-01-02",
+                    "description": "Historical lunch",
+                    "amount": "120",
+                    "currency": "TWD",
+                    "debit": "auto",
+                    "credit": "assets:cash",
+                    "import_id": "legacy-lunch",
+                    "tags": ["source:historical-import"],
+                }
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "explicit date, currency, and accounts"):
+            build_ingest_transactions(payload, existing_text="")
+
+    def test_opening_liability_rejects_reversed_normal_balance(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "opening-balance",
+                    "date": "2024-01-01",
+                    "description": "Opening card debt",
+                    "amount": "5000",
+                    "currency": "TWD",
+                    "debit": "liabilities:credit-card",
+                    "credit": "equity:opening-balances",
+                    "import_id": "legacy-opening-card",
+                    "tags": ["source:historical-import"],
+                }
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "opening liability must debit equity.*credit liabilities"):
+            build_ingest_transactions(payload, existing_text="")
+
+    def test_historical_kinds_enforce_semantic_account_families(self):
+        cases = [
+            ("expense", "assets:bank", "expenses:food"),
+            ("expense", "expenses:food", "income:salary"),
+            ("income", "income:salary", "assets:bank"),
+            ("income", "assets:bank", "expenses:food"),
+            ("refund", "expenses:food", "assets:bank"),
+            ("refund", "assets:bank", "income:salary"),
+            ("transfer", "expenses:food", "assets:bank"),
+            ("transfer", "assets:bank", "equity:opening-balances"),
+        ]
+        for kind, debit, credit in cases:
+            with self.subTest(kind=kind, debit=debit, credit=credit):
+                payload = {
+                    "transactions": [
+                        {
+                            "kind": kind,
+                            "date": "2024-01-02",
+                            "description": "Historical row",
+                            "amount": "120",
+                            "currency": "TWD",
+                            "debit": debit,
+                            "credit": credit,
+                            "import_id": f"row-{kind}",
+                            "tags": ["source:historical-import"],
+                        }
+                    ]
+                }
+                with self.assertRaisesRegex(ValueError, "account families"):
+                    build_ingest_transactions(payload, existing_text="")
+
+    def test_historical_refund_and_transfer_accept_valid_account_families(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "refund", "date": "2024-01-02", "description": "Refund",
+                    "amount": "120", "currency": "TWD", "debit": "assets:bank",
+                    "credit": "expenses:food", "import_id": "refund-1",
+                    "tags": ["source:historical-import"],
+                },
+                {
+                    "kind": "transfer", "date": "2024-01-03", "description": "Card payment",
+                    "amount": "500", "currency": "TWD", "debit": "liabilities:card",
+                    "credit": "assets:bank", "import_id": "transfer-1",
+                    "tags": ["source:historical-import"],
+                },
+            ]
+        }
+        journal, imported, skipped, _ = build_ingest_transactions(payload, existing_text="")
+        self.assertEqual((imported, skipped), (2, 0))
+        self.assertIn("; kind:refund", journal)
+        self.assertIn("; kind:transfer", journal)
+
+    def test_opening_balance_rejects_installments_and_fees(self):
+        base = {
+            "kind": "opening-balance",
+            "date": "2024-01-01",
+            "description": "Opening bank balance",
+            "amount": "5000",
+            "currency": "TWD",
+            "debit": "assets:bank",
+            "credit": "equity:opening-balances",
+            "import_id": "legacy-opening-bank",
+            "tags": ["source:historical-import"],
+        }
+        for field, value in (("installments", 2), ("fee", "1"), ("fee", "-1")):
+            with self.subTest(field=field, value=value):
+                with self.assertRaisesRegex(ValueError, "opening-balance.*installments.*fees"):
+                    build_ingest_transactions(
+                        {"transactions": [{**base, field: value}]}, existing_text=""
+                    )
+
+    def test_opening_balance_is_explicit_and_gets_a_kind_tag(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "opening-balance",
+                    "date": "2024-01-01",
+                    "description": "Opening bank balance",
+                    "amount": "5000",
+                    "currency": "TWD",
+                    "debit": "assets:bank",
+                    "credit": "equity:opening-balances",
+                    "import_id": "legacy-opening-bank",
+                    "tags": ["source:historical-import"],
+                }
+            ]
+        }
+        journal_text, imported, skipped, _decisions = build_ingest_transactions(
+            payload,
+            existing_text="",
+        )
+        self.assertEqual((imported, skipped), (1, 0))
+        self.assertIn("; kind:opening-balance", journal_text)
+        self.assertIn("assets:bank", journal_text)
+        self.assertIn("5000 TWD", journal_text)
+        self.assertIn("equity:opening-balances", journal_text)
+        self.assertNotIn("\n= ", journal_text)
+
+    def test_ingest_rejects_compound_tags_that_forge_reserved_metadata(self):
+        payload = {
+            "transactions": [
+                {
+                    "kind": "expense",
+                    "description": "Dinner",
+                    "amount": "100",
+                    "tags": ["source:fuzzy-text", "project:trip, kind:income"],
+                }
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "Tag|tag"):
+            build_ingest_transactions(payload, existing_text="")
+
+    def test_ingest_reserves_kind_and_import_id_tags_for_schema_fields(self):
+        for reserved in ("kind:expense", "import-id:bypass"):
+            with self.subTest(reserved=reserved):
+                payload = {
+                    "transactions": [
+                        {
+                            "kind": "expense",
+                            "description": "Dinner",
+                            "amount": "100",
+                            "tags": ["source:fuzzy-text", reserved],
+                        }
+                    ]
+                }
+                with self.assertRaisesRegex(ValueError, "reserved tag"):
+                    build_ingest_transactions(payload, existing_text="")
 
     def test_batch_requires_explicit_transaction_kind(self):
         payload = {
@@ -833,7 +1178,362 @@ class FuzzyIngestTests(unittest.TestCase):
             self.assertEqual(journal.read_text(encoding="utf-8"), original)
 
 
+class AuditTests(unittest.TestCase):
+    @staticmethod
+    def _transaction(account: str, amount: float, *, tags=None, description="Row"):
+        counterpart = -amount
+        return {
+            "tdate": "2024-01-01",
+            "tdescription": description,
+            "ttags": tags or [],
+            "tpostings": [
+                {"paccount": account, "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": amount}}]},
+                {"paccount": "assets:cash", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": counterpart}}]},
+            ],
+        }
+
+    def test_audit_flags_overwhelmingly_reversed_expenses_with_one_normal_row(self):
+        transactions = [self._transaction("expenses:food", -100) for _ in range(4184)]
+        transactions.append(self._transaction("expenses:food", 100))
+        report = audit_journal(transactions, "")
+        codes = {finding["code"] for finding in report["findings"]}
+        self.assertFalse(report["ok"])
+        self.assertIn("mostly-expenses-credit-normal", codes)
+
+    def test_audit_treats_untagged_contra_only_data_as_warning(self):
+        for account, amount, code in (
+            ("expenses:food", -100, "contra-only-expenses"),
+            ("income:salary", 100, "contra-only-income"),
+        ):
+            with self.subTest(account=account):
+                report = audit_journal(
+                    [self._transaction(account, amount) for _ in range(20)], ""
+                )
+                self.assertTrue(report["ok"])
+                self.assertEqual(report["critical_count"], 0)
+                self.assertIn(code, {finding["code"] for finding in report["findings"]})
+
+    def test_audit_validates_kind_tags_and_structure_for_nonhistorical_transactions(self):
+        duplicate_kind = self._transaction(
+            "expenses:food",
+            100,
+            tags=[["kind", "expense"], ["kind", "refund"], ["source", "receipt-image"]],
+        )
+        invalid_structure = self._transaction(
+            "income:other",
+            -100,
+            tags=[["kind", "expense"], ["source", "fuzzy-text"]],
+        )
+        report = audit_journal([duplicate_kind, invalid_structure], "")
+        codes = {finding["code"] for finding in report["findings"]}
+        self.assertIn("tagged-transaction-invalid-kind", codes)
+        self.assertIn("tagged-transaction-invalid-structure", codes)
+
+    def test_audit_validates_optional_source_and_import_id_tags(self):
+        transactions = [
+            self._transaction(
+                "expenses:food",
+                100,
+                tags=[["kind", "expense"], ["source", "unknown"]],
+            ),
+            self._transaction(
+                "expenses:food",
+                100,
+                tags=[
+                    ["kind", "expense"],
+                    ["source", "fuzzy-text"],
+                    ["source", "receipt-image"],
+                ],
+            ),
+            self._transaction(
+                "expenses:food",
+                100,
+                tags=[["kind", "expense"], ["import-id", "bad/id"]],
+            ),
+            self._transaction(
+                "expenses:food",
+                100,
+                tags=[["kind", "expense"], ["import-id", "one"], ["import-id", "two"]],
+            ),
+        ]
+        report = audit_journal(transactions, "")
+        codes = {finding["code"] for finding in report["findings"]}
+        self.assertIn("tagged-transaction-invalid-source", codes)
+        self.assertIn("tagged-transaction-invalid-import-id", codes)
+
+    def test_audit_detects_import_id_collisions_except_complete_installments(self):
+        collision = [
+            self._transaction(
+                "expenses:food",
+                100,
+                tags=[["kind", "expense"], ["import-id", "same-row"]],
+                description=description,
+            )
+            for description in ("Lunch", "Dinner")
+        ]
+        report = audit_journal(collision, "")
+        self.assertIn(
+            "duplicate-import-id",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+        complete = [
+            self._transaction(
+                "expenses:electronics",
+                100,
+                tags=[
+                    ["kind", "expense"],
+                    ["source", "structured-csv"],
+                    ["import-id", "phone-plan"],
+                ],
+                description=f"Phone [{index}/3]",
+            )
+            for index in range(1, 4)
+        ]
+        for transaction, txn_date in zip(
+            complete,
+            ("2024-01-31", "2024-02-29", "2024-03-31"),
+        ):
+            transaction["tdate"] = txn_date
+        report = audit_journal(complete, "")
+        self.assertNotIn(
+            "duplicate-import-id",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+        remainder_group = [
+            self._transaction(
+                "expenses:electronics",
+                amount,
+                tags=[
+                    ["kind", "expense"],
+                    ["source", "structured-csv"],
+                    ["import-id", "phone-six-parts"],
+                ],
+                description=f"Phone [{index}/6]",
+            )
+            for index, amount in enumerate([16.66, 16.66, 16.66, 16.66, 16.66, 16.70], start=1)
+        ]
+        for index, transaction in enumerate(remainder_group):
+            transaction["tdate"] = add_months(date(2024, 1, 31), index).isoformat()
+        report = audit_journal(remainder_group, "")
+        self.assertNotIn(
+            "duplicate-import-id",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+    def test_audit_rejects_installment_id_group_with_mismatched_metadata(self):
+        transactions = [
+            self._transaction(
+                account,
+                100,
+                tags=[
+                    ["kind", "expense"],
+                    ["source", source],
+                    ["import-id", "spoofed-installments"],
+                ],
+                description=f"Phone [{index}/2]",
+            )
+            for index, account, source in (
+                (1, "expenses:electronics", "structured-csv"),
+                (2, "expenses:travel", "historical-import"),
+            )
+        ]
+        transactions[0]["tdate"] = "2024-01-31"
+        transactions[1]["tdate"] = "2024-03-31"
+        report = audit_journal(transactions, "")
+        self.assertIn(
+            "duplicate-import-id",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+    def test_audit_rejects_installment_id_group_with_inconsistent_amounts(self):
+        transactions = [
+            self._transaction(
+                "expenses:electronics",
+                amount,
+                tags=[
+                    ["kind", "expense"],
+                    ["source", "structured-csv"],
+                    ["import-id", "bad-amount-installments"],
+                ],
+                description=f"Phone [{index}/2]",
+            )
+            for index, amount in ((1, 100), (2, 900))
+        ]
+        transactions[0]["tdate"] = "2024-01-31"
+        transactions[1]["tdate"] = "2024-02-29"
+        report = audit_journal(transactions, "")
+        self.assertIn(
+            "duplicate-import-id",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+    def test_audit_rejects_incomplete_or_ambiguous_installment_id_groups(self):
+        descriptions_by_case = {
+            "incomplete": ["Phone [1/3]", "Phone [2/3]"],
+            "duplicate-index": ["Phone [1/2]", "Phone [1/2]"],
+            "different-base": ["Phone [1/2]", "Tablet [2/2]"],
+            "different-total": ["Phone [1/2]", "Phone [2/3]"],
+        }
+        for name, descriptions in descriptions_by_case.items():
+            with self.subTest(name=name):
+                transactions = [
+                    self._transaction(
+                        "expenses:electronics",
+                        100,
+                        tags=[["kind", "expense"], ["import-id", f"group-{name}"]],
+                        description=description,
+                    )
+                    for description in descriptions
+                ]
+                report = audit_journal(transactions, "")
+                self.assertIn(
+                    "duplicate-import-id",
+                    {finding["code"] for finding in report["findings"]},
+                )
+
+    def test_audit_validates_historical_tag_cardinality_and_structure(self):
+        transaction = self._transaction(
+            "expenses:food",
+            -100,
+            tags=[
+                ["kind", "expense"], ["kind", "refund"],
+                ["source", "historical-import"], ["source", "structured-csv"],
+                ["import-id", "row-1"], ["import-id", "row-2"],
+            ],
+        )
+        report = audit_journal([transaction], "")
+        codes = {finding["code"] for finding in report["findings"]}
+        self.assertIn("historical-import-invalid-tags", codes)
+        self.assertIn("historical-import-invalid-structure", codes)
+
+    def test_recurring_legitimate_description_is_informational_not_strict_warning(self):
+        transactions = [
+            self._transaction("expenses:rent", 100, description="Monthly rent")
+            for _ in range(12)
+        ]
+        report = audit_journal(transactions, "")
+        finding = next(item for item in report["findings"] if item["code"] == "generic-description-dominates")
+        self.assertEqual(finding["severity"], "info")
+        self.assertEqual(report["warning_count"], 0)
+        self.assertTrue(report["ok"])
+
+    def test_audit_recognizes_compact_commented_rules_but_ignores_comment_blocks(self):
+        report = audit_journal(
+            [],
+            "comment\n= 2024-01-01\nend comment\n"
+            "=2024-02-01 ; mistaken opening\n"
+            "= 2024/3/1\n"
+            "2024-04-02 Account named comment\n"
+            "    comment\n"
+            "    assets:cash  -1 TWD\n"
+            "=2024.04.01 ; another mistaken opening\n",
+        )
+        finding = next(
+            item for item in report["findings"]
+            if item["code"] == "date-only-automated-posting"
+        )
+        self.assertEqual(finding["count"], 3)
+        self.assertEqual(finding["lines"], [4, 5, 9])
+
+    def test_audit_resets_comment_state_at_active_file_boundaries(self):
+        report = audit_journal(
+            [],
+            "comment\nignored forever in this file\n\x00hfin-source-boundary\x00\n= 2024-05-01\n",
+        )
+        self.assertIn(
+            "date-only-automated-posting",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+    def test_audit_flags_bulk_reversed_expenses_and_date_only_automated_rules(self):
+        transactions = [
+            {
+                "tdate": f"2024-01-{day:02d}",
+                "tdescription": "Legacy expense",
+                "tpostings": [
+                    {"paccount": "expenses:food", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": -100}}]},
+                    {"paccount": "assets:cash", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": 100}}]},
+                ],
+            }
+            for day in range(1, 11)
+        ]
+        report = audit_journal(
+            transactions,
+            "= 2024-01-01\n  assets:bank  5000 TWD\n  equity:opening-balances\n",
+        )
+        codes = {finding["code"] for finding in report["findings"]}
+        self.assertFalse(report["ok"])
+        self.assertIn("contra-only-expenses", codes)
+        self.assertIn("date-only-automated-posting", codes)
+        self.assertEqual(report["direction_summary"]["expense"]["credit_count"], 10)
+
+    def test_audit_accepts_normal_expense_income_and_opening_transactions(self):
+        transactions = [
+            {
+                "tdate": "2024-01-01",
+                "tdescription": "Opening bank balance",
+                "ttags": [["kind", "opening-balance"], ["source", "historical-import"], ["import-id", "opening-bank"]],
+                "tpostings": [
+                    {"paccount": "assets:bank", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": 5000}}]},
+                    {"paccount": "equity:opening-balances", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": -5000}}]},
+                ],
+            },
+            {
+                "tdate": "2024-01-02",
+                "tdescription": "Lunch",
+                "ttags": [["kind", "expense"], ["source", "historical-import"], ["import-id", "lunch-1"]],
+                "tpostings": [
+                    {"paccount": "expenses:food", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": 120}}]},
+                    {"paccount": "assets:cash", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": -120}}]},
+                ],
+            },
+            {
+                "tdate": "2024-01-03",
+                "tdescription": "Salary",
+                "ttags": [["kind", "income"], ["source", "historical-import"], ["import-id", "salary-1"]],
+                "tpostings": [
+                    {"paccount": "assets:bank", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": 30000}}]},
+                    {"paccount": "income:salary", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": -30000}}]},
+                ],
+            },
+        ]
+        report = audit_journal(transactions, "")
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["critical_count"], 0)
+
+    def test_audit_flags_historical_source_rows_without_import_ids(self):
+        transactions = [
+            {
+                "tdate": "2024-01-02",
+                "tdescription": "Lunch",
+                "ttags": [["kind", "expense"], ["source", "historical-import"]],
+                "tpostings": [
+                    {"paccount": "expenses:food", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": 120}}]},
+                    {"paccount": "assets:cash", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": -120}}]},
+                ],
+            }
+        ]
+        report = audit_journal(transactions, "")
+        self.assertIn("historical-import-missing-id", {item["code"] for item in report["findings"]})
+
+
 class ImportTests(unittest.TestCase):
+    def test_empty_csv_import_is_a_clean_noop(self):
+        journal, imported, skipped = import_csv_transactions(
+            rows=[],
+            existing_text="",
+            default_debit="auto",
+            credit_account="assets:cash",
+            currency="TWD",
+            date_column="date",
+            description_column="description",
+            amount_column="amount",
+            id_column="id",
+        )
+        self.assertEqual((journal, imported, skipped), ("", 0, 0))
+
     def test_csv_import_rejects_noncanonical_import_id(self):
         rows = [{"date": "2026-09-17", "description": "Dinner", "amount": "120", "id": "bank/123"}]
         with self.assertRaisesRegex(ValueError, "import ID"):
@@ -849,6 +1549,29 @@ class ImportTests(unittest.TestCase):
                 id_column="id",
             )
 
+    def test_csv_import_requires_expense_debit_category_prefix_and_payment_account(self):
+        rows = [{"date": "2026-09-17", "description": "Dinner", "amount": "120", "id": "row-1"}]
+        cases = [
+            ({"default_debit": "income:salary"}, "debit"),
+            ({"category_prefix": "income"}, "category prefix"),
+            ({"credit_account": "income:salary"}, "credit"),
+        ]
+        base = {
+            "rows": rows,
+            "existing_text": "",
+            "default_debit": "expenses:food",
+            "credit_account": "assets:cash",
+            "currency": "TWD",
+            "date_column": "date",
+            "description_column": "description",
+            "amount_column": "amount",
+            "id_column": "id",
+        }
+        for changes, message in cases:
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(ValueError, message):
+                    import_csv_transactions(**{**base, **changes})
+
     def test_csv_import_supports_per_row_installment_count_and_deduplication(self):
         rows = list(csv.DictReader(io.StringIO(
             "date,description,amount,installments,id,category\n"
@@ -857,7 +1580,12 @@ class ImportTests(unittest.TestCase):
         )))
         journal, imported, skipped = import_csv_transactions(
             rows=rows,
-            existing_text="; import-id:abc\n",
+            existing_text=(
+                "2026-08-01 Existing\n"
+                "    ; import-id:abc\n"
+                "    expenses:old  1 TWD\n"
+                "    assets:cash  -1 TWD\n"
+            ),
             default_debit="expenses:uncategorized",
             credit_account="liabilities:card",
             currency="TWD",
@@ -876,7 +1604,7 @@ class ImportTests(unittest.TestCase):
         self.assertNotIn("Laptop", journal)
 
     def test_csv_import_rejects_signed_or_negative_rows_in_expense_mode(self):
-        rows = [{"date": "2026-09-17", "description": "Refund", "amount": "-980"}]
+        rows = [{"date": "2026-09-17", "description": "Refund", "amount": "-980", "id": "refund-1"}]
         with self.assertRaisesRegex(ValueError, "positive expense amount"):
             import_csv_transactions(
                 rows=rows,
@@ -887,10 +1615,98 @@ class ImportTests(unittest.TestCase):
                 date_column="date",
                 description_column="description",
                 amount_column="amount",
+                id_column="id",
             )
 
+    def test_csv_import_rejects_non_finite_amounts(self):
+        for value in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(value=value):
+                rows = [
+                    {
+                        "date": "2026-09-17",
+                        "description": "Invalid amount",
+                        "amount": value,
+                        "id": f"amount-{value}",
+                    }
+                ]
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    import_csv_transactions(
+                        rows=rows,
+                        existing_text="",
+                        default_debit="auto",
+                        credit_account="assets:cash",
+                        currency="TWD",
+                        date_column="date",
+                        description_column="description",
+                        amount_column="amount",
+                        id_column="id",
+                    )
+
+    def test_duplicate_csv_rows_are_validated_before_they_are_skipped(self):
+        rows = [
+            {
+                "date": "2026-09-17",
+                "description": "Invalid duplicate",
+                "amount": "NaN",
+                "id": "duplicate-amount",
+            }
+        ]
+        existing = (
+            "2026-09-01 Existing\n"
+            "    ; import-id:duplicate-amount\n"
+            "    expenses:food  1 TWD\n"
+            "    assets:cash  -1 TWD\n"
+        )
+        with self.assertRaisesRegex(ValueError, "finite"):
+            import_csv_transactions(
+                rows=rows,
+                existing_text=existing,
+                default_debit="auto",
+                credit_account="assets:cash",
+                currency="TWD",
+                date_column="date",
+                description_column="description",
+                amount_column="amount",
+                id_column="id",
+            )
+
+    def test_csv_import_requires_nonempty_stable_ids(self):
+        rows = [{"date": "2026-09-17", "description": "Dinner", "amount": "120", "id": ""}]
+        with self.assertRaisesRegex(ValueError, "requires a non-empty import ID"):
+            import_csv_transactions(
+                rows=rows,
+                existing_text="",
+                default_debit="auto",
+                credit_account="assets:cash",
+                currency="TWD",
+                date_column="date",
+                description_column="description",
+                amount_column="amount",
+                id_column="id",
+            )
+
+    def test_csv_import_adds_machine_checkable_source_and_kind_tags(self):
+        rows = [{"date": "2026-09-17", "description": "Dinner", "amount": "120", "id": "row-1"}]
+        journal, imported, skipped = import_csv_transactions(
+            rows=rows,
+            existing_text="",
+            default_debit="expenses:food",
+            credit_account="assets:cash",
+            currency="TWD",
+            date_column="date",
+            description_column="description",
+            amount_column="amount",
+            id_column="id",
+        )
+        self.assertEqual((imported, skipped), (1, 0))
+        self.assertIn("; source:structured-csv", journal)
+        self.assertIn("; kind:expense", journal)
+        self.assertIn("; import-id:row-1", journal)
+
     def test_csv_import_auto_classifies_rows_without_category(self):
-        rows = [{"date": "2026-09-17", "description": "全聯採買", "amount": "980"}]
+        rows = [
+            {"date": "2026-09-17", "description": "全聯採買", "amount": "980", "id": "groceries-1"}
+        ]
         journal, imported, skipped = import_csv_transactions(
             rows=rows,
             existing_text="",
@@ -900,12 +1716,205 @@ class ImportTests(unittest.TestCase):
             date_column="date",
             description_column="description",
             amount_column="amount",
+            id_column="id",
         )
         self.assertEqual((imported, skipped), (1, 0))
         self.assertIn("expenses:food:groceries", journal)
 
 
 class CliWriteBehaviorTests(unittest.TestCase):
+    def test_audit_command_returns_failure_for_reversed_bulk_expenses(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            reversed_transaction = (
+                "2024-01-01 Legacy expense\n"
+                "    expenses:food  -100 TWD\n"
+                "    assets:cash  100 TWD\n\n"
+            )
+            normal_transaction = (
+                "2024-01-02 Normal expense\n"
+                "    expenses:food  100 TWD\n"
+                "    assets:cash  -100 TWD\n\n"
+            )
+            journal.write_text(
+                reversed_transaction * 100 + normal_transaction,
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(script), "--journal", str(journal), "audit"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        report = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(report["ok"])
+        self.assertIn("mostly-expenses-credit-normal", {item["code"] for item in report["findings"]})
+
+    def test_audit_checks_included_journal_sources_for_date_only_rules(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            included = Path(tmp) / "history.journal"
+            journal.write_text("include history.journal\n", encoding="utf-8")
+            included.write_text(
+                "= 2024-01-01\n"
+                "    assets:bank  5000 TWD\n"
+                "    equity:opening-balances\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(script), "--journal", str(journal), "audit"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        report = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(
+            "date-only-automated-posting",
+            {item["code"] for item in report["findings"]},
+        )
+
+    def test_ingest_deduplicates_ids_from_included_journals(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            book = Path(tmp)
+            journal = book / "main.journal"
+            included = book / "history.journal"
+            batch = book / "batch.json"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            included.write_text(
+                "2024-01-02 Historical lunch\n"
+                "    ; source:historical-import\n"
+                "    ; kind:expense\n"
+                "    ; import-id:included-row-1\n"
+                "    expenses:food  120 TWD\n"
+                "    assets:cash  -120 TWD\n",
+                encoding="utf-8",
+            )
+            journal.write_text(
+                journal.read_text(encoding="utf-8") + "include history.journal\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "-C", tmp, "add", "main.journal", "history.journal"], check=True)
+            subprocess.run(["git", "-C", tmp, "commit", "-qm", "include history"], check=True)
+            batch.write_text(
+                json.dumps(
+                    {
+                        "transactions": [
+                            {
+                                "kind": "expense",
+                                "date": "2024-01-02",
+                                "description": "Historical lunch",
+                                "amount": "120",
+                                "currency": "TWD",
+                                "debit": "expenses:food",
+                                "credit": "assets:cash",
+                                "import_id": "included-row-1",
+                                "tags": ["source:historical-import"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                base + ["ingest-json", str(batch)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            skipped_text = journal.read_text(encoding="utf-8")
+            payload = json.loads(batch.read_text(encoding="utf-8"))
+            payload["transactions"][0]["description"] = "Unique historical dinner"
+            payload["transactions"][0]["import_id"] = "included-row-2"
+            batch.write_text(json.dumps(payload), encoding="utf-8")
+            unique_result = subprocess.run(
+                base + ["ingest-json", str(batch)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            written_text = journal.read_text(encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("duplicates skipped: 1", result.stderr)
+        self.assertNotIn("Historical lunch", skipped_text)
+        self.assertEqual(unique_result.returncode, 0, unique_result.stderr)
+        self.assertIn("Unique historical dinner", written_text)
+
+    def test_audit_waits_for_the_shared_journal_lock(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            journal.write_text("; empty\n", encoding="utf-8")
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            lock = _acquire_journal_lock(journal)
+            try:
+                process = subprocess.Popen(
+                    base + ["audit"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                time.sleep(0.3)
+                blocked = process.poll() is None
+            finally:
+                lock.close()
+            stdout, stderr = process.communicate(timeout=10)
+        self.assertTrue(blocked, "audit read the journal without waiting for the shared lock")
+        self.assertEqual(process.returncode, 0, stderr or stdout)
+
+    def test_import_csv_requires_id_column(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            source = Path(tmp) / "rows.csv"
+            source.write_text("date,description,amount\n2024-01-02,Lunch,120\n", encoding="utf-8")
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            result = subprocess.run(
+                base + ["import-csv", str(source), "--credit", "assets:cash"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--id-column", result.stderr)
+
+    def test_import_csv_rejects_removed_allow_missing_id_option(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            source = Path(tmp) / "rows.csv"
+            journal.write_text("; empty\n", encoding="utf-8")
+            source.write_text(
+                "date,description,amount,id\n2024-01-02,Lunch,120,row-1\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--journal",
+                    str(journal),
+                    "import-csv",
+                    str(source),
+                    "--credit",
+                    "assets:cash",
+                    "--id-column",
+                    "id",
+                    "--allow-missing-id",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments: --allow-missing-id", result.stderr)
+
     def test_init_rejects_a_symlink_journal(self):
         script = SKILL_DIR / "scripts" / "finance.py"
         with tempfile.TemporaryDirectory() as tmp:
@@ -1283,6 +2292,36 @@ class CliWriteBehaviorTests(unittest.TestCase):
 
 
 class HledgerIntegrationTests(unittest.TestCase):
+    def test_long_debit_credit_and_fee_accounts_keep_amount_separators(self):
+        accounts = {
+            "debit": "expenses:electronics:phones:personal:replacement",
+            "credit": "liabilities:credit-card:provider:platinum:primary",
+            "fee": "expenses:fees:installments:provider:processing:monthly",
+        }
+        journal = render_installments(
+            start=date(2026, 10, 1),
+            description="Phone",
+            total=Decimal("1200"),
+            count=2,
+            debit_account=accounts["debit"],
+            credit_account=accounts["credit"],
+            currency="TWD",
+            fee_per_installment=Decimal("10"),
+            fee_account=accounts["fee"],
+        )
+        for account in accounts.values():
+            self.assertRegex(journal, rf"(?m)^    {re.escape(account)}  +-?\d")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "book.journal"
+            path.write_text(journal, encoding="utf-8")
+            result = subprocess.run(
+                ["hledger", "-f", str(path), "check"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_generated_installments_pass_hledger_validation(self):
         journal = render_installments(
             start=date(2026, 10, 1),
