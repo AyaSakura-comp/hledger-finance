@@ -27,6 +27,10 @@ All normalized `amount` values are positive magnitudes.
 | Credit-card payment | `transfer` | credit-card liability | paying asset |
 | Positive opening asset balance | `opening-balance` | asset | `equity:opening-balances` |
 | Opening debt/liability balance | `opening-balance` | `equity:opening-balances` | liability |
+| Supported migration increase to an asset | `adjustment` | asset | `equity:migration:*` |
+| Supported migration decrease to an asset | `adjustment` | `equity:migration:*` | asset |
+| Supported migration increase to a liability | `adjustment` | `equity:migration:*` | liability |
+| Supported migration decrease to a liability | `adjustment` | liability | `equity:migration:*` |
 
 Examples:
 
@@ -127,6 +131,28 @@ Rules for cross-currency transfers:
 - `debit_amount` must be a positive finite decimal; `NaN` and `Infinity` are rejected.
 - Installments and fees are not supported on cross-currency transfers.
 - All existing strict source/date/account/import-id rules and the different-account guard still apply.
+
+## Migration adjustments
+
+Use `kind: adjustment` only when source evidence supports a historical migration balance correction or a transfer-rounding difference. Post exactly one asset or liability against `equity:migration` or one of its children. Choose direction from the economic effect: debit an asset to increase it, credit an asset to decrease it, credit a liability to increase it, or debit a liability to decrease it.
+
+Every adjustment requires explicit positive finite amount, date, currency, debit, credit, and stable `import_id`, plus exactly one approved historical source tag (`source:historical-import` or `source:structured-csv`). Adjustments do not permit inferred/`auto` fields, installments, fees, or `debit_amount`/`debit_currency`. Income, expense, general equity, `equity:opening-balances`, identical-account, and multi-posting structures are invalid.
+
+This kind is not for ordinary income or expense and is never an excuse to hide an unexplained difference. If the reason or direction is not supported, quarantine and reconcile the row instead of forcing an adjustment.
+
+```json
+{
+  "kind": "adjustment",
+  "date": "2024-09-08",
+  "description": "Documented wallet migration rounding",
+  "amount": "0.01",
+  "currency": "TWD",
+  "debit": "assets:cash:wallet",
+  "credit": "equity:migration:rounding",
+  "import_id": "moze-rounding-001",
+  "tags": ["source:historical-import"]
+}
+```
 
 ## Required workflow
 

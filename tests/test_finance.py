@@ -19,6 +19,7 @@ sys.path.insert(0, str(SKILL_DIR))
 
 from scripts.finance import (  # noqa: E402
     _acquire_journal_lock,
+    _amount_decimal,
     _append_validated_and_commit,
     _axis_number,
     _composition_entries,
@@ -898,6 +899,160 @@ class FuzzyIngestTests(unittest.TestCase):
         self.assertIn("; kind:refund", journal)
         self.assertIn("; kind:transfer", journal)
 
+    def test_adjustment_accepts_only_the_four_migration_balance_directions(self):
+        account_pairs = (
+            ("assets:bank", "equity:migration:legacy", "Asset increase"),
+            ("equity:migration:legacy", "assets:bank", "Asset decrease"),
+            ("equity:migration:legacy", "liabilities:card", "Liability increase"),
+            ("liabilities:card", "equity:migration:legacy", "Liability decrease"),
+        )
+        payload = {
+            "transactions": [
+                {
+                    "kind": "adjustment",
+                    "date": f"2024-01-0{index}",
+                    "description": description,
+                    "amount": "1.25",
+                    "currency": "TWD",
+                    "debit": debit,
+                    "credit": credit,
+                    "import_id": f"adjustment-{index}",
+                    "tags": [
+                        "source:historical-import" if index % 2 else "source:structured-csv"
+                    ],
+                }
+                for index, (debit, credit, description) in enumerate(account_pairs, start=1)
+            ]
+        }
+        journal, imported, skipped, _ = build_ingest_transactions(payload, existing_text="")
+        self.assertEqual((imported, skipped), (4, 0))
+        self.assertEqual(journal.count("; kind:adjustment"), 4)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "adjustments.journal"
+            path.write_text(journal, encoding="utf-8")
+            check = subprocess.run(
+                ["hledger", "-f", str(path), "check"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            printed = subprocess.run(
+                ["hledger", "-f", str(path), "print", "--output-format=json"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            strict_audit = subprocess.run(
+                [
+                    sys.executable,
+                    str(SKILL_DIR / "scripts" / "finance.py"),
+                    "--journal",
+                    str(path),
+                    "audit",
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(check.returncode, 0, check.stderr)
+        self.assertEqual(printed.returncode, 0, printed.stderr)
+        self.assertEqual(strict_audit.returncode, 0, strict_audit.stderr or strict_audit.stdout)
+        report = audit_journal(json.loads(printed.stdout), journal)
+        self.assertTrue(report["ok"], report["findings"])
+        self.assertEqual(report["critical_count"], 0)
+
+    def test_adjustment_requires_explicit_migration_fields(self):
+        base = {
+            "kind": "adjustment",
+            "date": "2024-01-02",
+            "description": "Legacy balance correction",
+            "amount": "10",
+            "currency": "TWD",
+            "debit": "assets:bank",
+            "credit": "equity:migration:legacy",
+            "import_id": "adjustment-required-fields",
+            "tags": ["source:historical-import"],
+        }
+        for field in ("amount", "date", "currency", "debit", "credit", "import_id"):
+            with self.subTest(field=field):
+                record = {key: value for key, value in base.items() if key != field}
+                with self.assertRaisesRegex(ValueError, field.replace("_", " ") + "|explicit|import_id"):
+                    build_ingest_transactions({"transactions": [record]}, existing_text="")
+
+    def test_adjustment_rejects_nonhistorical_or_inferred_sources(self):
+        base = {
+            "kind": "adjustment",
+            "date": "2024-01-02",
+            "description": "Legacy balance correction",
+            "amount": "10",
+            "currency": "TWD",
+            "debit": "assets:bank",
+            "credit": "equity:migration:legacy",
+            "import_id": "adjustment-source",
+        }
+        for tags in (
+            ["source:fuzzy-text"],
+            ["source:historical-import", "source:structured-csv"],
+            ["source:historical-import", "inferred:currency"],
+        ):
+            with self.subTest(tags=tags):
+                with self.assertRaisesRegex(ValueError, "historical source|exactly one|inferred|explicit"):
+                    build_ingest_transactions(
+                        {"transactions": [{**base, "tags": tags}]}, existing_text=""
+                    )
+
+    def test_adjustment_rejects_non_migration_account_pairs(self):
+        invalid_pairs = (
+            ("assets:bank", "assets:cash"),
+            ("assets:bank", "income:other"),
+            ("expenses:fees", "equity:migration:legacy"),
+            ("assets:bank", "equity:capital"),
+            ("assets:bank", "equity:opening-balances"),
+            ("equity:migration:legacy", "equity:migration:rounding"),
+            ("assets:bank", "assets:bank"),
+        )
+        for index, (debit, credit) in enumerate(invalid_pairs, start=1):
+            with self.subTest(debit=debit, credit=credit):
+                record = {
+                    "kind": "adjustment",
+                    "date": "2024-01-02",
+                    "description": "Invalid adjustment",
+                    "amount": "10",
+                    "currency": "TWD",
+                    "debit": debit,
+                    "credit": credit,
+                    "import_id": f"invalid-adjustment-{index}",
+                    "tags": ["source:historical-import"],
+                }
+                with self.assertRaisesRegex(ValueError, "different|account families|migration"):
+                    build_ingest_transactions({"transactions": [record]}, existing_text="")
+
+    def test_adjustment_rejects_installments_fees_and_cross_currency_fields(self):
+        base = {
+            "kind": "adjustment",
+            "date": "2024-01-02",
+            "description": "Legacy balance correction",
+            "amount": "10",
+            "currency": "TWD",
+            "debit": "assets:bank",
+            "credit": "equity:migration:legacy",
+            "import_id": "adjustment-options",
+            "tags": ["source:structured-csv"],
+        }
+        invalid_options = (
+            {"installments": 2},
+            {"fee": "0.01"},
+            {"fee": "-0.01"},
+            {"debit_amount": "1", "debit_currency": "USD"},
+        )
+        for options in invalid_options:
+            with self.subTest(options=options):
+                with self.assertRaisesRegex(ValueError, "installments|fee|debit_amount|debit_currency"):
+                    build_ingest_transactions(
+                        {"transactions": [{**base, **options}]}, existing_text=""
+                    )
+
     def test_opening_balance_rejects_installments_and_fees(self):
         base = {
             "kind": "opening-balance",
@@ -1540,6 +1695,33 @@ class AuditTests(unittest.TestCase):
         ]
         report = audit_journal(transactions, "")
         self.assertIn("historical-import-missing-id", {item["code"] for item in report["findings"]})
+
+    def test_audit_rejects_adjustment_with_nonhistorical_source_or_extra_posting(self):
+        base = {
+            "tdate": "2024-01-02",
+            "tdescription": "Legacy correction",
+            "ttags": [
+                ["kind", "adjustment"],
+                ["source", "historical-import"],
+                ["import-id", "adjustment-audit"],
+            ],
+            "tpostings": [
+                {"paccount": "assets:bank", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": 10}}]},
+                {"paccount": "equity:migration:legacy", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": -10}}]},
+            ],
+        }
+        wrong_source = {**base, "ttags": [
+            ["kind", "adjustment"], ["source", "fuzzy-text"], ["import-id", "adjustment-audit"]
+        ]}
+        extra_posting = {**base, "tpostings": [
+            *base["tpostings"],
+            {"paccount": "equity:migration:rounding", "pamount": [{"acommodity": "TWD", "aquantity": {"floatingPoint": -1}}]},
+        ]}
+        for transaction in (wrong_source, extra_posting):
+            with self.subTest(transaction=transaction):
+                report = audit_journal([transaction], "")
+                self.assertFalse(report["ok"])
+                self.assertGreater(report["critical_count"], 0)
 
 
 class ImportTests(unittest.TestCase):
@@ -2748,15 +2930,15 @@ class CrossCurrencyTransferTests(unittest.TestCase):
                 {
                     "kind": "transfer",
                     "date": "2024-09-08",
-                    "description": "Loan principal repayment",
-                    "amount": "3000",
-                    "currency": "TWD",
-                    "debit": "liabilities:loans:personal",
+                    "description": "Cross-currency asset transfer",
+                    "amount": "14368",
+                    "currency": "JPY",
+                    "debit": "assets:bank:checking",
                     "credit": "assets:cash:wallet",
-                    "import_id": "moze-repay-001",
+                    "import_id": "moze-asset-pair-001",
                     "tags": ["source:historical-import"],
-                    "debit_amount": "14368",
-                    "debit_currency": "JPY",
+                    "debit_amount": "3000",
+                    "debit_currency": "TWD",
                 }
             ]
         }
@@ -2764,12 +2946,28 @@ class CrossCurrencyTransferTests(unittest.TestCase):
             payload, existing_text=""
         )
         self.assertEqual((imported, skipped), (1, 0))
-        # Verify audit_journal does not flag structure for @@ postings
-        transactions = parse_ingest_json(
-            json.dumps(payload, ensure_ascii=False)
-        )
-        report = audit_journal(transactions["transactions"], journal_text)
-        self.assertTrue(report["ok"])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cross-currency.journal"
+            path.write_text(journal_text, encoding="utf-8")
+            printed = subprocess.run(
+                ["hledger", "-f", str(path), "print", "--output-format=json"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(printed.returncode, 0, printed.stderr)
+        transactions = json.loads(printed.stdout)
+        self.assertEqual(len(transactions), 1)
+        postings = {posting["paccount"]: posting for posting in transactions[0]["tpostings"]}
+        destination_amount = postings["assets:bank:checking"]["pamount"][0]
+        source_amount = postings["assets:cash:wallet"]["pamount"][0]
+        self.assertEqual(destination_amount["acommodity"], "TWD")
+        self.assertEqual(_amount_decimal(destination_amount), Decimal("3000"))
+        self.assertEqual(source_amount["acommodity"], "JPY")
+        self.assertEqual(_amount_decimal(source_amount), Decimal("-14368"))
+
+        report = audit_journal(transactions, journal_text)
+        self.assertTrue(report["ok"], report["findings"])
         self.assertEqual(report["critical_count"], 0)
         self.assertNotIn(
             "tagged-transaction-invalid-structure",

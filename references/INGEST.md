@@ -42,7 +42,7 @@ The top-level value may be a transaction array or an object containing shared `d
 
 Supported default fields:
 
-- `kind`: required for every resolved record; `expense`, `income`, `transfer`, `refund`, or `opening-balance`
+- `kind`: required for every resolved record; `expense`, `income`, `transfer`, `refund`, `opening-balance`, or migration-only `adjustment`
 - `date`: ISO `YYYY-MM-DD`
 - `currency`: hledger commodity, default `TWD`
 - `debit`: account or `auto`, default `auto`
@@ -77,12 +77,14 @@ The CLI appends a canonical `kind:*` tag and converts `import_id` to `import-id:
 
 Unknown fields, duplicate JSON object keys, and non-finite JSON numbers (`NaN`/`Infinity`) are rejected instead of silently ignored. Decimal JSON literals are parsed directly as decimal values rather than binary floats, preserving financial precision. This catches agent-generated typos such as `ammount` and ambiguous payloads containing two `amount` keys. Descriptions, dates, currencies, accounts, tags, fee accounts, and import IDs must use their documented JSON string types; `null`, booleans, containers, empty required strings, terminal control characters, and non-finite decimal amounts/fees are rejected. `installments` must be a JSON integer of at least one; booleans and fractional numbers are rejected. `debit_amount` and `debit_currency` follow the same validation: positive finite decimal and valid hledger commodity respectively, required together only for `kind:transfer`.
 
-`kind: expense` permits `debit: auto` and controlled payment-source defaults. Every non-expense kind requires explicit `debit` and `credit` accounts and cannot use `debit: auto`; this prevents income, refunds, transfers, and opening balances from silently becoming expenses.
+`kind: expense` permits `debit: auto` and controlled payment-source defaults. Every non-expense kind requires explicit `debit` and `credit` accounts and cannot use `debit: auto`; this prevents income, refunds, transfers, opening balances, and adjustments from silently becoming expenses.
 
 For opening balances, use ordinary dated balanced transactions—never hledger's `=` automated-posting syntax:
 
 - positive asset: debit the asset, credit `equity:opening-balances`;
 - opening liability/debt: debit `equity:opening-balances`, credit the liability.
+
+`kind: adjustment` is deliberately narrow. Use it only for a supported historical migration balance correction or transfer-rounding difference. It requires an explicit positive finite `amount`, `date`, `currency`, `debit`, `credit`, and `import_id`; exactly one `source:historical-import` or `source:structured-csv` tag; one asset-or-liability account; and one `equity:migration` account (or child), in either direction. It rejects inferred/`auto` fields, installments, fees, cross-currency fields, identical accounts, and all income, expense, general-equity, and opening-equity pairs. Never use an adjustment for ordinary income or expense, or to hide an unexplained difference.
 
 For bulk existing-data migration, also follow [HISTORICAL_IMPORT.md](HISTORICAL_IMPORT.md). Source signs are display conventions, not hledger posting directions.
 

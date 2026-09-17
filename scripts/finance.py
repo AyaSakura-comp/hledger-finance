@@ -174,6 +174,10 @@ def _is_opening_equity(account: str) -> bool:
     )
 
 
+def _is_migration_equity(account: str) -> bool:
+    return account == "equity:migration" or account.startswith("equity:migration:")
+
+
 def _validate_kind_accounts(kind: str, debit: str, credit: str, label: str) -> None:
     debit_family = _account_family(debit)
     credit_family = _account_family(credit)
@@ -183,6 +187,10 @@ def _validate_kind_accounts(kind: str, debit: str, credit: str, label: str) -> N
         "income": debit_family in asset_or_liability and credit_family == "income",
         "refund": debit_family in asset_or_liability and credit_family == "expenses",
         "transfer": debit_family in asset_or_liability and credit_family in asset_or_liability,
+        "adjustment": (
+            (debit_family in asset_or_liability and _is_migration_equity(credit))
+            or (_is_migration_equity(debit) and credit_family in asset_or_liability)
+        ),
     }
     if kind in valid and not valid[kind]:
         raise ValueError(f"{label} kind {kind} has invalid debit/credit account families")
@@ -200,7 +208,7 @@ APPROVED_SOURCE_TAGS = {
     "source:voice-transcript",
 }
 HISTORICAL_SOURCE_TAGS = {"source:structured-csv", "source:historical-import"}
-INGEST_KINDS = {"expense", "income", "transfer", "refund", "opening-balance"}
+INGEST_KINDS = {"expense", "income", "transfer", "refund", "opening-balance", "adjustment"}
 _SOURCE_BOUNDARY_SENTINEL = "\x00hfin-source-boundary\x00"
 
 
@@ -611,6 +619,28 @@ def _kind_structure_is_valid(transaction: dict, kind: str) -> bool:
             and any(family in asset_or_liability and value > 0 for family, _account, value in entries)
             and any(family in asset_or_liability and value < 0 for family, _account, value in entries)
         )
+    if kind == "adjustment":
+        postings = transaction.get("tpostings", [])
+        if len(postings) != 2 or any(len(posting.get("pamount", [])) != 1 for posting in postings):
+            return False
+        if len(entries) != 2:
+            return False
+        migration_entries = [
+            (account, value)
+            for _family, account, value in entries
+            if _is_migration_equity(account)
+        ]
+        balance_entries = [
+            (account, value)
+            for family, account, value in entries
+            if family in asset_or_liability
+        ]
+        return (
+            len(migration_entries) == 1
+            and len(balance_entries) == 1
+            and migration_entries[0][0] != balance_entries[0][0]
+            and ((migration_entries[0][1] > 0) != (balance_entries[0][1] > 0))
+        )
     if kind == "opening-balance":
         asset_opening = (
             all(
@@ -749,6 +779,7 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
     historical_missing_ids = 0
     historical_invalid_tags = 0
     historical_invalid_structures = 0
+    adjustment_invalid_tags = 0
     import_id_transactions: defaultdict[str, list[dict]] = defaultdict(list)
     descriptions: defaultdict[str, int] = defaultdict(int)
 
@@ -794,6 +825,12 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
                 historical_invalid_tags += 1
             if not structure_valid:
                 historical_invalid_structures += 1
+        if kind == "adjustment" and not (
+            valid_source
+            and f"source:{source_values[0]}" in HISTORICAL_SOURCE_TAGS
+            and valid_id
+        ):
+            adjustment_invalid_tags += 1
 
         for posting in transaction.get("tpostings", []):
             account = str(posting.get("paccount", ""))
@@ -960,6 +997,15 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
                 "code": "historical-import-invalid-structure",
                 "count": historical_invalid_structures,
                 "message": "Historical transaction postings do not match the account families and direction required by their kind.",
+            }
+        )
+    if adjustment_invalid_tags:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "adjustment-invalid-tags",
+                "count": adjustment_invalid_tags,
+                "message": "Adjustments require exactly one approved historical source and one canonical import ID.",
             }
         )
     if transactions and descriptions:
@@ -1668,7 +1714,7 @@ def build_ingest_transactions(
         kind = _ingest_string(kind_value, f"Ingest record {index} kind") if kind_value is not None else None
         if kind not in INGEST_KINDS:
             raise ValueError(
-                f"Ingest record {index} kind must be expense, income, transfer, refund, or opening-balance"
+                f"Ingest record {index} kind must be expense, income, transfer, refund, opening-balance, or adjustment"
             )
         has_date = "date" in record or "date" in defaults
         raw_date = record.get("date", defaults.get("date"))
@@ -1677,6 +1723,7 @@ def build_ingest_transactions(
             txn_date = date.fromisoformat(date_text)
         else:
             txn_date = today
+        has_currency = "currency" in record or "currency" in defaults
         currency = _validate_currency(
             _ingest_string(
                 record.get("currency", defaults.get("currency", "TWD")),
@@ -1712,9 +1759,9 @@ def build_ingest_transactions(
         if debit != "auto":
             debit = _validate_account(debit)
         credit = _validate_account(credit)
-        if kind == "transfer" and debit == credit:
+        if kind in {"transfer", "adjustment"} and debit == credit:
             raise ValueError(
-                f"Ingest record {index} transfer requires different debit and credit accounts"
+                f"Ingest record {index} {kind} requires different debit and credit accounts"
             )
 
         _has_debit_amount = "debit_amount" in record or "debit_amount" in defaults
@@ -1748,9 +1795,9 @@ def build_ingest_transactions(
             raise ValueError(f"Ingest record {index} has an invalid fee") from error
         if not fee.is_finite():
             raise ValueError(f"Ingest record {index} fee must be finite")
-        if kind == "opening-balance" and (count != 1 or fee != 0):
+        if kind in {"opening-balance", "adjustment"} and (count != 1 or fee != 0):
             raise ValueError(
-                f"Ingest record {index} opening-balance requires installments=1 and fees=0"
+                f"Ingest record {index} {kind} requires installments=1 and fees=0"
             )
         fee_account = _validate_account(
             _ingest_string(
@@ -1829,6 +1876,10 @@ def build_ingest_transactions(
             raise ValueError(
                 f"Ingest record {index} requires exactly one approved source tag"
             )
+        if kind == "adjustment" and source_tags[0] not in HISTORICAL_SOURCE_TAGS:
+            raise ValueError(
+                f"Ingest record {index} adjustment requires exactly one approved historical source tag"
+            )
         reserved_tags = [
             tag for tag in tags if tag.startswith("kind:") or tag.startswith("import-id:")
         ]
@@ -1839,6 +1890,12 @@ def build_ingest_transactions(
         if source_tags[0] in HISTORICAL_SOURCE_TAGS and not import_id:
             raise ValueError(
                 f"Ingest record {index} historical imports require import_id"
+            )
+        if kind == "adjustment" and not (
+            has_date and has_currency and has_debit and has_credit and import_id
+        ):
+            raise ValueError(
+                f"Ingest record {index} adjustment requires explicit date, currency, debit, credit, and import_id"
             )
         if source_tags[0] in HISTORICAL_SOURCE_TAGS and (
             debit == "auto" or any(tag.startswith("inferred:") for tag in tags)
