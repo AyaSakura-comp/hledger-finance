@@ -668,7 +668,7 @@ def _date_only_automated_rule_lines(journal_text: str) -> list[int]:
         if in_comment_block or not stripped or stripped.startswith(";"):
             continue
         directive = line.split(";", 1)[0].strip()
-        if re.fullmatch(
+        if top_level and re.fullmatch(
             r"=\s*\d{4}(?P<separator>[-/.])\d{1,2}(?P=separator)\d{1,2}",
             directive,
         ):

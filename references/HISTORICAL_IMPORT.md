@@ -93,7 +93,7 @@ Never test a first-time migration against the production journal.
 ```bash
 workdir="$(mktemp -d)"
 hfin --journal "$workdir/main.journal" init
-hfin --journal "$workdir/main.journal" ingest-json normalized.json --preview 
+hfin --journal "$workdir/main.journal" ingest-json normalized.json --preview
 hfin --journal "$workdir/main.journal" ingest-json normalized.json
 hfin --journal "$workdir/main.journal" check
 hfin --journal "$workdir/main.journal" audit --strict

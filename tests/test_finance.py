@@ -1428,7 +1428,10 @@ class AuditTests(unittest.TestCase):
             "2024-04-02 Account named comment\n"
             "    comment\n"
             "    assets:cash  -1 TWD\n"
-            "=2024.04.01 ; another mistaken opening\n",
+            "=2024.04.01 ; another mistaken opening\n"
+            "2024-06-01 Account resembles directive\n"
+            "    = 2024-06-01\n"
+            "    assets:cash  -1 TWD\n",
         )
         finding = next(
             item for item in report["findings"]
