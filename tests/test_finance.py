@@ -1907,6 +1907,347 @@ class AuditTests(unittest.TestCase):
             ],
         }
 
+    @staticmethod
+    def _loan_transactions(*, paid_periods=0, remaining_periods=3):
+        journal, _periods = build_loan_resume_schedule(
+            loan_id="audit-loan",
+            start=date(2026, 1, 31),
+            description="Audit loan",
+            principal=Decimal("300"),
+            annual_rate=Decimal("0"),
+            payment=Decimal("100"),
+            paid_periods=paid_periods,
+            remaining_periods=remaining_periods,
+            currency="TWD",
+            liability_account="liabilities:loans:audit",
+            interest_account="expenses:interest:loans",
+            payment_account="assets:bank:checking",
+            rounding_quantum=Decimal("1"),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "loan.journal"
+            path.write_text(journal, encoding="utf-8")
+            result = subprocess.run(
+                ["hledger", "-f", str(path), "print", "--output-format=json"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        if result.returncode:
+            raise AssertionError(result.stderr)
+        return journal, json.loads(result.stdout)
+
+    @staticmethod
+    def _copy_transaction(transaction):
+        return json.loads(json.dumps(transaction))
+
+    def test_audit_accepts_generated_full_and_resumed_loan_schedules(self):
+        for paid_periods, remaining_periods in ((0, 3), (25, 3)):
+            with self.subTest(paid_periods=paid_periods):
+                journal, transactions = self._loan_transactions(
+                    paid_periods=paid_periods,
+                    remaining_periods=remaining_periods,
+                )
+                report = audit_journal(transactions, journal)
+                self.assertTrue(report["ok"], report["findings"])
+
+    def test_audit_rejects_invalid_scheduled_loan_metadata(self):
+        _journal, transactions = self._loan_transactions()
+        original = transactions[0]
+        required = (
+            "source",
+            "kind",
+            "loan-id",
+            "loan-period",
+            "loan-total-periods",
+            "import-id",
+        )
+        cases = []
+        for name in required:
+            missing = self._copy_transaction(original)
+            missing["ttags"] = [tag for tag in missing["ttags"] if tag[0] != name]
+            cases.append((f"missing-{name}", missing))
+            duplicate = self._copy_transaction(original)
+            duplicate["ttags"].append(next(tag for tag in duplicate["ttags"] if tag[0] == name))
+            cases.append((f"duplicate-{name}", duplicate))
+        replacements = (
+            ("source", "fuzzy-text"),
+            ("kind", "expense"),
+            ("loan-id", "bad/id"),
+            ("loan-period", "0"),
+            ("loan-total-periods", "0"),
+            ("import-id", "wrong-id"),
+        )
+        for name, value in replacements:
+            changed = self._copy_transaction(original)
+            changed["ttags"] = [
+                [tag_name, value if tag_name == name else tag_value]
+                for tag_name, tag_value in changed["ttags"]
+            ]
+            cases.append((f"wrong-{name}", changed))
+        wrong_description = self._copy_transaction(original)
+        wrong_description["tdescription"] = "Audit loan [2/3]"
+        cases.append(("wrong-description", wrong_description))
+
+        for name, transaction in cases:
+            with self.subTest(name=name):
+                report = audit_journal([transaction], "")
+                self.assertIn(
+                    "scheduled-loan-invalid-metadata",
+                    {finding["code"] for finding in report["findings"]},
+                )
+
+    def test_audit_rejects_invalid_scheduled_loan_posting_shapes(self):
+        _journal, transactions = self._loan_transactions()
+        original = transactions[0]
+        cases = []
+
+        wrong_liability = self._copy_transaction(original)
+        wrong_liability["tpostings"][0]["paccount"] = "assets:loan"
+        cases.append(("wrong-liability", wrong_liability))
+        wrong_interest = self._copy_transaction(original)
+        wrong_interest["tpostings"][1]["paccount"] = "assets:interest"
+        cases.append(("wrong-interest", wrong_interest))
+        wrong_payment = self._copy_transaction(original)
+        wrong_payment["tpostings"][2]["paccount"] = "expenses:payment"
+        cases.append(("wrong-payment", wrong_payment))
+        overlapping = self._copy_transaction(original)
+        overlapping["tpostings"][2]["paccount"] = "liabilities:loans"
+        cases.append(("overlapping", overlapping))
+        wrong_signs = self._copy_transaction(original)
+        wrong_signs["tpostings"][0]["pamount"][0]["aquantity"] = {"floatingPoint": -100}
+        wrong_signs["tpostings"][2]["pamount"][0]["aquantity"] = {"floatingPoint": 100}
+        cases.append(("wrong-signs", wrong_signs))
+        missing = self._copy_transaction(original)
+        missing["tpostings"].pop()
+        cases.append(("missing", missing))
+        extra = self._copy_transaction(original)
+        extra["tpostings"].append(self._copy_transaction(extra["tpostings"][1]))
+        cases.append(("extra", extra))
+        mixed = self._copy_transaction(original)
+        mixed["tpostings"][1]["pamount"][0]["acommodity"] = "USD"
+        cases.append(("mixed", mixed))
+        unitless = self._copy_transaction(original)
+        unitless["tpostings"][1]["pamount"][0]["acommodity"] = ""
+        cases.append(("unitless", unitless))
+        unbalanced = self._copy_transaction(original)
+        unbalanced["tpostings"][2]["pamount"][0]["aquantity"] = {"floatingPoint": -99}
+        cases.append(("unbalanced", unbalanced))
+        priced = self._copy_transaction(original)
+        priced["tpostings"][0]["pamount"][0]["aprice"] = {"tag": "UnitPrice"}
+        cases.append(("price", priced))
+        costed = self._copy_transaction(original)
+        costed["tpostings"][0]["pcost"] = {"tag": "UnitCost"}
+        cases.append(("cost", costed))
+        asserted = self._copy_transaction(original)
+        asserted["tpostings"][0]["pbalanceassertion"] = {"baamount": {}}
+        cases.append(("assertion", asserted))
+        virtual = self._copy_transaction(original)
+        virtual["tpostings"][0]["ptype"] = "VirtualPosting"
+        cases.append(("virtual", virtual))
+        balanced_virtual = self._copy_transaction(original)
+        balanced_virtual["tpostings"][0]["ptype"] = "BalancedVirtualPosting"
+        cases.append(("balanced-virtual", balanced_virtual))
+
+        for name, transaction in cases:
+            with self.subTest(name=name):
+                report = audit_journal([transaction], "")
+                self.assertIn(
+                    "tagged-transaction-invalid-structure",
+                    {finding["code"] for finding in report["findings"]},
+                )
+
+    def test_strict_audit_rejects_real_hledger_loan_shape_attacks(self):
+        header = (
+            "2026-01-31 Audit loan [1/1]\n"
+            "    ; source:scheduled-loan\n"
+            "    ; kind:loan-payment\n"
+            "    ; loan-id:audit-loan\n"
+            "    ; loan-period:1\n"
+            "    ; loan-total-periods:1\n"
+            "    ; import-id:loan.audit-loan.period.1\n"
+        )
+        cases = {
+            "virtual": (
+                "    (liabilities:loans:audit)  100 TWD\n"
+                "    (expenses:interest:loans)  0 TWD\n"
+                "    (assets:bank:checking)  -100 TWD\n"
+            ),
+            "balanced-virtual": (
+                "    [liabilities:loans:audit]  100 TWD\n"
+                "    [expenses:interest:loans]  0 TWD\n"
+                "    [assets:bank:checking]  -100 TWD\n"
+            ),
+            "assertion": (
+                "    liabilities:loans:audit  100 TWD = 100 TWD\n"
+                "    expenses:interest:loans  0 TWD\n"
+                "    assets:bank:checking  -100 TWD\n"
+            ),
+            "assignment": (
+                "    liabilities:loans:audit  = 100 TWD\n"
+                "    expenses:interest:loans  0 TWD\n"
+                "    assets:bank:checking  -100 TWD\n"
+            ),
+            "price": (
+                "    liabilities:loans:audit  100 TWD @ 1 USD\n"
+                "    expenses:interest:loans  0 USD\n"
+                "    assets:bank:checking  -100 USD\n"
+            ),
+            "cost": (
+                "    liabilities:loans:audit  100 TWD {1 USD}\n"
+                "    expenses:interest:loans  0 USD\n"
+                "    assets:bank:checking  -100 USD\n"
+            ),
+            "unitless": (
+                "    liabilities:loans:audit  100\n"
+                "    expenses:interest:loans  0\n"
+                "    assets:bank:checking  -100\n"
+            ),
+            "mixed": (
+                "    liabilities:loans:audit  100 TWD\n"
+                "    expenses:interest:loans  0 USD\n"
+                "    assets:bank:checking  -100 TWD\n"
+            ),
+        }
+        for name, postings in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                journal = Path(tmp) / "malformed-loan.journal"
+                journal_text = header + postings
+                journal.write_text(journal_text, encoding="utf-8")
+                printed = subprocess.run(
+                    ["hledger", "-f", str(journal), "print", "--output-format=json"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(printed.returncode, 0, printed.stderr)
+                transactions = json.loads(printed.stdout)
+                parsed_postings = transactions[0]["tpostings"]
+                if name == "virtual":
+                    self.assertTrue(all(p["ptype"] == "VirtualPosting" for p in parsed_postings))
+                elif name == "balanced-virtual":
+                    self.assertTrue(
+                        all(p["ptype"] == "BalancedVirtualPosting" for p in parsed_postings)
+                    )
+                elif name in {"assertion", "assignment"}:
+                    self.assertIsNotNone(parsed_postings[0]["pbalanceassertion"])
+                elif name in {"price", "cost"}:
+                    self.assertIsNotNone(parsed_postings[0]["pamount"][0]["aprice"])
+                elif name == "unitless":
+                    self.assertTrue(
+                        all(
+                            amount["acommodity"] == ""
+                            for posting in parsed_postings
+                            for amount in posting["pamount"]
+                        )
+                    )
+                elif name == "mixed":
+                    self.assertEqual(
+                        {
+                            amount["acommodity"]
+                            for posting in parsed_postings
+                            for amount in posting["pamount"]
+                        },
+                        {"TWD", "USD"},
+                    )
+                report = audit_journal(transactions, journal_text)
+                self.assertIn(
+                    "tagged-transaction-invalid-structure",
+                    {finding["code"] for finding in report["findings"]},
+                )
+                strict = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SKILL_DIR / "scripts" / "finance.py"),
+                        "--journal",
+                        str(journal),
+                        "audit",
+                        "--strict",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(strict.returncode, 2, strict.stderr or strict.stdout)
+
+    def test_audit_rejects_invalid_scheduled_loan_groups(self):
+        _journal, original = self._loan_transactions()
+        cases = []
+        cases.append(("missing-period", [original[0], original[2]]))
+        duplicate = self._copy_transaction(original)
+        duplicate[1] = self._copy_transaction(duplicate[0])
+        cases.append(("duplicate-period", duplicate))
+
+        different_total = self._copy_transaction(original)
+        for tag in different_total[1]["ttags"]:
+            if tag[0] == "loan-total-periods":
+                tag[1] = "4"
+            elif tag[0] == "import-id":
+                tag[1] = "loan.audit-loan.period.2"
+        different_total[1]["tdescription"] = "Audit loan [2/4]"
+        cases.append(("different-total", different_total))
+
+        different_base = self._copy_transaction(original)
+        different_base[1]["tdescription"] = "Changed loan [2/3]"
+        cases.append(("different-base", different_base))
+        different_account = self._copy_transaction(original)
+        different_account[1]["tpostings"][0]["paccount"] = "liabilities:loans:other"
+        cases.append(("different-account", different_account))
+        different_commodity = self._copy_transaction(original)
+        for posting in different_commodity[1]["tpostings"]:
+            posting["pamount"][0]["acommodity"] = "USD"
+        cases.append(("different-commodity", different_commodity))
+        wrong_date = self._copy_transaction(original)
+        wrong_date[1]["tdate"] = "2026-03-01"
+        cases.append(("wrong-date", wrong_date))
+        unequal_payment = self._copy_transaction(original)
+        unequal_payment[1]["tpostings"][0]["pamount"][0]["aquantity"] = {"floatingPoint": 90}
+        unequal_payment[1]["tpostings"][2]["pamount"][0]["aquantity"] = {"floatingPoint": -90}
+        cases.append(("unequal-payment", unequal_payment))
+
+        for name, transactions in cases:
+            with self.subTest(name=name):
+                report = audit_journal(transactions, "")
+                self.assertIn(
+                    "scheduled-loan-invalid-schedule",
+                    {finding["code"] for finding in report["findings"]},
+                )
+
+    def test_audit_rejects_unpaired_scheduled_loan_source_and_kind(self):
+        _journal, transactions = self._loan_transactions()
+        for tag_name, value in (("kind", "expense"), ("source", "fuzzy-text")):
+            with self.subTest(tag_name=tag_name):
+                transaction = self._copy_transaction(transactions[0])
+                transaction["ttags"] = [
+                    [name, value if name == tag_name else current]
+                    for name, current in transaction["ttags"]
+                ]
+                report = audit_journal([transaction], "")
+                self.assertIn(
+                    "scheduled-loan-invalid-metadata",
+                    {finding["code"] for finding in report["findings"]},
+                )
+
+    def test_ingest_json_rejects_reserved_scheduled_loan_metadata(self):
+        base = {
+            "date": "2026-01-01",
+            "description": "Forged loan",
+            "amount": "100",
+            "currency": "TWD",
+            "debit": "expenses:test",
+            "credit": "assets:cash",
+        }
+        cases = (
+            {**base, "kind": "loan-payment", "tags": ["source:fuzzy-text"]},
+            {**base, "kind": "expense", "tags": ["source:scheduled-loan"]},
+        )
+        for record in cases:
+            with self.subTest(record=record):
+                with self.assertRaises(ValueError):
+                    build_ingest_transactions(
+                        {"transactions": [record]}, existing_text=""
+                    )
+
     def test_audit_flags_overwhelmingly_reversed_expenses_with_one_normal_row(self):
         transactions = [self._transaction("expenses:food", -100) for _ in range(4184)]
         transactions.append(self._transaction("expenses:food", 100))

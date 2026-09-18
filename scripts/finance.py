@@ -233,6 +233,8 @@ APPROVED_SOURCE_TAGS = {
 }
 HISTORICAL_SOURCE_TAGS = {"source:structured-csv", "source:historical-import"}
 INGEST_KINDS = {"expense", "income", "transfer", "refund", "opening-balance", "adjustment"}
+MANAGED_SOURCE_TAGS = APPROVED_SOURCE_TAGS | {"source:scheduled-loan"}
+MANAGED_KINDS = INGEST_KINDS | {"loan-payment"}
 INSTALLMENT_KINDS = {"expense", "income", "transfer", "refund"}
 _SOURCE_BOUNDARY_SENTINEL = "\x00hfin-source-boundary\x00"
 
@@ -877,6 +879,142 @@ def _transaction_tag_values(transaction: dict) -> dict[str, list[str]]:
     return dict(values)
 
 
+def _loan_payment_metadata(transaction: dict) -> dict | None:
+    tags = _transaction_tag_values(transaction)
+    required = (
+        "source",
+        "kind",
+        "loan-id",
+        "loan-period",
+        "loan-total-periods",
+        "import-id",
+    )
+    if any(len(tags.get(name, [])) != 1 for name in required):
+        return None
+    if tags["source"][0] != "scheduled-loan" or tags["kind"][0] != "loan-payment":
+        return None
+    loan_id = tags["loan-id"][0]
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", loan_id):
+        return None
+    period_text = tags["loan-period"][0]
+    total_text = tags["loan-total-periods"][0]
+    if not re.fullmatch(r"[1-9]\d*", period_text) or not re.fullmatch(
+        r"[1-9]\d*", total_text
+    ):
+        return None
+    period = int(period_text)
+    total = int(total_text)
+    if period > total or tags["import-id"][0] != _loan_import_id(loan_id, period):
+        return None
+    description = str(transaction.get("tdescription", "")).strip()
+    match = re.fullmatch(rf"(.+?) \[{period}/{total}\]", description)
+    if not match:
+        return None
+    try:
+        txn_date = date.fromisoformat(str(transaction.get("tdate", "")))
+    except ValueError:
+        return None
+    return {
+        "loan_id": loan_id,
+        "period": period,
+        "total": total,
+        "base_description": match.group(1),
+        "date": txn_date,
+    }
+
+
+def _loan_payment_structure(transaction: dict) -> dict | None:
+    postings = transaction.get("tpostings", [])
+    if len(postings) != 3:
+        return None
+    amounts = []
+    for posting in postings:
+        posting_amounts = posting.get("pamount", [])
+        if (
+            posting.get("ptype") != "RegularPosting"
+            or posting.get("pbalanceassertion") is not None
+            or posting.get("pcost") is not None
+            or posting.get("pprice") is not None
+            or len(posting_amounts) != 1
+        ):
+            return None
+        amount = posting_amounts[0]
+        if amount.get("aprice") is not None or not amount.get("acommodity"):
+            return None
+        amounts.append(
+            (
+                str(posting.get("paccount", "")),
+                str(amount["acommodity"]),
+                _amount_decimal(amount),
+            )
+        )
+    commodities = {commodity for _account, commodity, _value in amounts}
+    if len(commodities) != 1:
+        return None
+    principal = [
+        entry
+        for entry in amounts
+        if _account_family(entry[0]) == "liabilities" and entry[2] > 0
+    ]
+    interest = [
+        entry
+        for entry in amounts
+        if _account_family(entry[0]) == "expenses" and entry[2] >= 0
+    ]
+    payment = [
+        entry
+        for entry in amounts
+        if _account_family(entry[0]) in {"assets", "liabilities"} and entry[2] < 0
+    ]
+    if len(principal) != 1 or len(interest) != 1 or len(payment) != 1:
+        return None
+    role_accounts = (principal[0][0], interest[0][0], payment[0][0])
+    if any(
+        _accounts_conflict(left, right)
+        for index, left in enumerate(role_accounts)
+        for right in role_accounts[index + 1 :]
+    ):
+        return None
+    if principal[0][2] + interest[0][2] != -payment[0][2]:
+        return None
+    return {
+        "accounts": role_accounts,
+        "commodity": next(iter(commodities)),
+        "payment": -payment[0][2],
+    }
+
+
+def _loan_payment_structure_is_valid(transaction: dict) -> bool:
+    return _loan_payment_structure(transaction) is not None
+
+
+def _loan_schedule_group_is_valid(rows: Sequence[dict]) -> bool:
+    if not rows:
+        return False
+    totals = {row["total"] for row in rows}
+    bases = {row["base_description"] for row in rows}
+    accounts = {row["accounts"] for row in rows}
+    commodities = {row["commodity"] for row in rows}
+    if any(len(values) != 1 for values in (totals, bases, accounts, commodities)):
+        return False
+    total = next(iter(totals))
+    periods = [row["period"] for row in rows]
+    if len(periods) != len(set(periods)):
+        return False
+    first_period = min(periods)
+    if sorted(periods) != list(range(first_period, total + 1)):
+        return False
+    by_period = {row["period"]: row for row in rows}
+    first_date = by_period[first_period]["date"]
+    if any(
+        row["date"] != add_months(first_date, row["period"] - first_period)
+        for row in rows
+    ):
+        return False
+    nonfinal_payments = {row["payment"] for row in rows if row["period"] != total}
+    return len(nonfinal_payments) <= 1
+
+
 def _kind_structure_is_valid(transaction: dict, kind: str) -> bool:
     entries: list[tuple[str | None, str, Decimal]] = []
     for posting in transaction.get("tpostings", []):
@@ -889,6 +1027,8 @@ def _kind_structure_is_valid(transaction: dict, kind: str) -> bool:
         return False
 
     asset_or_liability = {"assets", "liabilities"}
+    if kind == "loan-payment":
+        return _loan_payment_structure_is_valid(transaction)
     if kind == "expense":
         return (
             all((family == "expenses" and value > 0) or (family in asset_or_liability and value < 0)
@@ -1130,6 +1270,8 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
     historical_invalid_tags = 0
     historical_invalid_structures = 0
     adjustment_invalid_tags = 0
+    scheduled_loan_invalid_metadata = 0
+    scheduled_loan_groups: defaultdict[str, list[dict]] = defaultdict(list)
     import_id_transactions: defaultdict[str, list[dict]] = defaultdict(list)
     descriptions: defaultdict[str, int] = defaultdict(int)
 
@@ -1142,15 +1284,27 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
         source_values = tags.get("source", [])
         import_ids = tags.get("import-id", [])
         managed = bool(kinds or source_values or import_ids)
-        valid_kind = len(kinds) == 1 and kinds[0] in INGEST_KINDS
+        valid_kind = len(kinds) == 1 and kinds[0] in MANAGED_KINDS
         kind = kinds[0] if valid_kind else None
         structure_valid = bool(kind and _kind_structure_is_valid(transaction, kind))
+        scheduled_loan_claim = (
+            "scheduled-loan" in source_values or "loan-payment" in kinds
+        )
+        loan_metadata = _loan_payment_metadata(transaction) if scheduled_loan_claim else None
+        if scheduled_loan_claim and loan_metadata is None:
+            scheduled_loan_invalid_metadata += 1
+        if loan_metadata is not None and structure_valid:
+            loan_structure = _loan_payment_structure(transaction)
+            if loan_structure is not None:
+                scheduled_loan_groups[loan_metadata["loan_id"]].append(
+                    {**loan_metadata, **loan_structure}
+                )
         if managed and not valid_kind:
             invalid_kinds += 1
         if managed and not structure_valid:
             invalid_structures += 1
 
-        valid_source = len(source_values) == 1 and f"source:{source_values[0]}" in APPROVED_SOURCE_TAGS
+        valid_source = len(source_values) == 1 and f"source:{source_values[0]}" in MANAGED_SOURCE_TAGS
         if source_values and not valid_source:
             invalid_sources += 1
         valid_id = len(import_ids) == 1 and bool(
@@ -1251,6 +1405,30 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
                 }
             )
 
+    if scheduled_loan_invalid_metadata:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "scheduled-loan-invalid-metadata",
+                "count": scheduled_loan_invalid_metadata,
+                "message": "Scheduled loan transactions require canonical source, kind, loan period, total, description, and import-ID metadata.",
+            }
+        )
+    invalid_loan_schedules = sorted(
+        loan_id
+        for loan_id, rows in scheduled_loan_groups.items()
+        if not _loan_schedule_group_is_valid(rows)
+    )
+    if invalid_loan_schedules:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "scheduled-loan-invalid-schedule",
+                "count": len(invalid_loan_schedules),
+                "loan_ids": invalid_loan_schedules[:20],
+                "message": "Scheduled loan groups must be complete, consecutive, monthly, and internally consistent.",
+            }
+        )
     if invalid_kinds:
         findings.append(
             {
