@@ -627,6 +627,7 @@ def _kind_structure_is_valid(transaction: dict, kind: str) -> bool:
         values = [_amount_decimal(amount) for amount in amounts]
         if (
             any(posting.get("ptype") != "RegularPosting" for posting in postings)
+            or any(posting.get("pbalanceassertion") is not None for posting in postings)
             or any(value == 0 for value in values)
             or any(not amount.get("acommodity") for amount in amounts)
             or any(amount.get("aprice") is not None for amount in amounts)

@@ -1808,9 +1808,97 @@ class AuditTests(unittest.TestCase):
             posting["ptype"] == "RegularPosting"
             for posting in transactions[0]["tpostings"]
         ))
+        self.assertTrue(all(
+            posting["pbalanceassertion"] is None
+            for posting in transactions[0]["tpostings"]
+        ))
         report = audit_journal(transactions, journal_text)
         self.assertTrue(report["ok"], report["findings"])
         self.assertEqual(strict_audit.returncode, 0, strict_audit.stderr or strict_audit.stdout)
+
+    def test_audit_strict_rejects_real_hledger_dynamic_balance_assignment(self):
+        journal_text = (
+            "2024-01-02 Dynamic balance assignment\n"
+            "    ; kind:adjustment\n"
+            "    ; source:historical-import\n"
+            "    ; import-id:dynamic-balance-assignment\n"
+            "    assets:bank  = 10 TWD\n"
+            "    equity:migration:legacy\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "dynamic-balance-assignment.journal"
+            journal.write_text(journal_text, encoding="utf-8")
+            printed = subprocess.run(
+                ["hledger", "-f", str(journal), "print", "--output-format=json"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            strict_audit = subprocess.run(
+                [
+                    sys.executable,
+                    str(SKILL_DIR / "scripts" / "finance.py"),
+                    "--journal",
+                    str(journal),
+                    "audit",
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(printed.returncode, 0, printed.stderr)
+        transactions = json.loads(printed.stdout)
+        self.assertIsNotNone(transactions[0]["tpostings"][0]["pbalanceassertion"])
+        report = audit_journal(transactions, journal_text)
+        self.assertIn(
+            "tagged-transaction-invalid-structure",
+            {finding["code"] for finding in report["findings"]},
+        )
+        self.assertEqual(strict_audit.returncode, 2, strict_audit.stderr or strict_audit.stdout)
+
+    def test_audit_strict_rejects_real_hledger_balance_assertion_adjustment(self):
+        journal_text = (
+            "2024-01-02 Balance assertion adjustment\n"
+            "    ; kind:adjustment\n"
+            "    ; source:historical-import\n"
+            "    ; import-id:balance-assertion-adjustment\n"
+            "    assets:bank  10 TWD = 10 TWD\n"
+            "    equity:migration:legacy  -10 TWD\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "balance-assertion-adjustment.journal"
+            journal.write_text(journal_text, encoding="utf-8")
+            printed = subprocess.run(
+                ["hledger", "-f", str(journal), "print", "--output-format=json"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            strict_audit = subprocess.run(
+                [
+                    sys.executable,
+                    str(SKILL_DIR / "scripts" / "finance.py"),
+                    "--journal",
+                    str(journal),
+                    "audit",
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(printed.returncode, 0, printed.stderr)
+        transactions = json.loads(printed.stdout)
+        self.assertIsNotNone(transactions[0]["tpostings"][0]["pbalanceassertion"])
+        report = audit_journal(transactions, journal_text)
+        self.assertIn(
+            "tagged-transaction-invalid-structure",
+            {finding["code"] for finding in report["findings"]},
+        )
+        self.assertEqual(strict_audit.returncode, 2, strict_audit.stderr or strict_audit.stdout)
 
     def test_audit_strict_rejects_real_hledger_virtual_adjustment(self):
         journal_text = (
