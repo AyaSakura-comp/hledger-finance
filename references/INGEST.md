@@ -46,7 +46,7 @@ Supported default fields:
 - `date`: ISO `YYYY-MM-DD`
 - `currency`: hledger commodity, default `TWD`
 - `debit`: account or `auto`, default `auto`
-- `credit`: source account, default `assets:cash`
+- `credit`: source account; if omitted for an ordinary expense, use the resolved currency route described below, then fall back to `assets:cash` when unmatched routing is allowed
 - `tags`: list of hledger tags/comments
 - `installments`: positive integer, default `1`
 - `fee`: nonnegative fee per installment, default `0`
@@ -77,7 +77,7 @@ The CLI appends a canonical `kind:*` tag and converts `import_id` to `import-id:
 
 Unknown fields, duplicate JSON object keys, and non-finite JSON numbers (`NaN`/`Infinity`) are rejected instead of silently ignored. Decimal JSON literals are parsed directly as decimal values rather than binary floats, preserving financial precision. This catches agent-generated typos such as `ammount` and ambiguous payloads containing two `amount` keys. Descriptions, dates, currencies, accounts, tags, fee accounts, and import IDs must use their documented JSON string types; `null`, booleans, containers, empty required strings, terminal control characters, and non-finite decimal amounts/fees are rejected. `installments` must be a JSON integer of at least one; booleans and fractional numbers are rejected. `debit_amount` and `debit_currency` follow the same validation: positive finite decimal and valid hledger commodity respectively, required together only for `kind:transfer`.
 
-`kind: expense` permits `debit: auto` and controlled payment-source defaults. Every non-expense kind requires explicit `debit` and `credit` accounts and cannot use `debit: auto`; this prevents income, refunds, transfers, opening balances, and adjustments from silently becoming expenses.
+`kind: expense` permits `debit: auto` and controlled payment-source defaults. Every non-expense kind requires explicit `debit` and `credit` accounts and cannot use `debit: auto`; this prevents income, refunds, transfers, opening balances, and adjustments from silently becoming expenses. An explicit record-level or defaults-level `credit` is never replaced by currency routing.
 
 For opening balances, use ordinary dated balanced transactions—never hledger's `=` automated-posting syntax:
 
@@ -96,8 +96,25 @@ For ordinary expenses, use these defaults without interrupting the user:
 |---|---|---|
 | Date | authoritative current local date | `inferred:date` |
 | Currency | `TWD`, unless source/context shows another | `inferred:currency` |
-| Payment source | `assets:cash` | `inferred:payment-account` |
+| Payment source | resolved currency route, otherwise `assets:cash` when unmatched routing is allowed | `inferred:payment-account`; routed records also get `inferred:currency-routing` |
 | Expense category | `auto` | classification is reported by CLI |
+
+For future fuzzy capture, an optional `payment-account-rules.json` beside the journal maps literal currencies to payment accounts:
+
+```json
+{
+  "currency_accounts": {
+    "TWD": "assets:cash:wallet",
+    "JPY": "assets:bank:jpy-account",
+    "USD": "assets:bank:usd-account"
+  },
+  "require_match": true
+}
+```
+
+The file is optional; absence is equivalent to an empty map with `require_match: false`. When present, both top-level fields are required and no others are accepted. Currency keys must be valid commodity strings, route values must be strings naming valid `assets:*` or `liabilities:*` accounts, and `require_match` must be a JSON boolean. Routes are exact map lookups after currency resolution—never regexes or executable expressions.
+
+Routing applies only when `kind` is `expense`, the source is not historical/structured, and neither the record nor `defaults` supplies `credit`. A matched route adds `inferred:payment-account` and `inferred:currency-routing`. If no route matches, `require_match: false` retains the legacy `assets:cash` fallback and only `inferred:payment-account`; `require_match: true` rejects the record with a focused request for explicit `credit`. Explicit cash/card/bank accounts always win, and non-expense kinds are never auto-routed.
 
 Always include exactly one approved source tag:
 
@@ -111,7 +128,7 @@ Always include exactly one approved source tag:
 - `source:pdf`
 - `source:voice-transcript`
 
-On the `ingest-json` path, `source:structured-csv` and `source:historical-import` require explicit date, currency, debit account, and credit account; they reject `auto` categories and `inferred:*` defaults. The separate positive-expense-only `import-csv` command is the sole exception: it may classify a missing expense category before rendering because it fixes `kind:expense`, validates one explicit payment account, and requires a stable ID for every row. Use `source:messy-csv` only for a small ad-hoc fuzzy extraction, not to bypass historical-migration safeguards.
+On the `ingest-json` path, `source:structured-csv` and `source:historical-import` require explicit date, currency, debit account, and credit account; they reject `auto` categories and `inferred:*` defaults. Currency payment routing is deliberately not applied to these sources: preserve the historical CSV/app source account row by row. The separate positive-expense-only `import-csv` command is the sole exception: it may classify a missing expense category before rendering because it fixes `kind:expense`, validates one explicit payment account, and requires a stable ID for every row. Use `source:messy-csv` only for a small ad-hoc fuzzy extraction, not to bypass historical-migration safeguards.
 
 Do not infer a numeric amount from incomplete digits. Ask one focused question when:
 

@@ -96,9 +96,24 @@ hfin ingest-json /tmp/agent-normalized-transactions.json
 
 A whole batch creates one Git commit and can be reversed with one `hfin undo`. Missing date, TWD currency, or payment source may use audited defaults; unreadable amounts and materially ambiguous transaction directions are never invented. See [`references/INGEST.md`](references/INGEST.md) for the JSON contract and receipt/table extraction policy.
 
+Optional currency routing for future fuzzy capture lives beside the journal in `payment-account-rules.json`:
+
+```json
+{
+  "currency_accounts": {
+    "TWD": "assets:cash:wallet",
+    "JPY": "assets:bank:jpy-account",
+    "USD": "assets:bank:usd-account"
+  },
+  "require_match": true
+}
+```
+
+For an ordinary `ingest-json` expense with no `credit` in either the record or defaults, the already-resolved currency selects the payment account and the CLI adds `inferred:payment-account` plus `inferred:currency-routing`. Explicit accounts always win. With `require_match: false`, an unmatched currency keeps the compatible `assets:cash` fallback; with `true`, it requires explicit `credit`. The exact schema is mandatory when the file exists: unknown fields, invalid currencies/accounts, non-string routes, and routes outside `assets:*` or `liabilities:*` are rejected. Routes are literal map keys, never regexes or executable rules.
+
 ## Historical CSV and app migration
 
-Do not translate an existing export by copying signed amounts into raw hledger postings. Profile the source convention, normalize positive magnitudes with explicit semantic kinds, require stable IDs, keep real merchant descriptions, and represent opening balances as dated balanced transactions—not `=` automated posting rules. Run the complete migration against an isolated journal, reconcile control totals by kind/currency, then require both `hfin check` and `hfin audit --strict` before production import. See [`references/HISTORICAL_IMPORT.md`](references/HISTORICAL_IMPORT.md).
+Do not translate an existing export by copying signed amounts into raw hledger postings. Profile the source convention, normalize positive magnitudes with explicit semantic kinds, require stable IDs, keep real merchant descriptions, and represent opening balances as dated balanced transactions—not `=` automated posting rules. Currency routing is only for future fuzzy expense capture: historical and structured imports must preserve each source payment account with explicit `debit` and `credit` and are never auto-routed. Run the complete migration against an isolated journal, reconcile control totals by kind/currency, then require both `hfin check` and `hfin audit --strict` before production import. See [`references/HISTORICAL_IMPORT.md`](references/HISTORICAL_IMPORT.md).
 
 ## Automatic expense categorization
 

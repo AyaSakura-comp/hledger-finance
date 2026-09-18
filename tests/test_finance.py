@@ -28,6 +28,7 @@ from scripts.finance import (  # noqa: E402
     _require_regular_journal,
     _chart_amount,
     _ellipsize,
+    _load_payment_account_rules,
     add_months,
     build_hledger_query,
     build_ingest_transactions,
@@ -496,6 +497,228 @@ class VisualizationQATemplateTests(unittest.TestCase):
         for scenario in scenarios:
             self.assertTrue(scenario["name"])
             self.assertIn(scenario["kind"], {"render", "error"})
+
+
+class PaymentAccountRoutingTests(unittest.TestCase):
+    RULES = {
+        "currency_accounts": {
+            "TWD": "assets:cash:wallet",
+            "JPY": "assets:bank:jpy-account",
+            "USD": "assets:bank:usd-account",
+        },
+        "require_match": True,
+    }
+
+    def test_optional_rules_file_has_backward_compatible_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rules = _load_payment_account_rules(Path(tmp) / "main.journal")
+        self.assertEqual(rules, {"currency_accounts": {}, "require_match": False})
+
+    def test_rules_file_uses_a_strict_non_executable_schema(self):
+        invalid_payloads = (
+            "{not json",
+            json.dumps({}),
+            json.dumps({"currency_accounts": {}}),
+            json.dumps({"require_match": False}),
+            json.dumps({"currency_accounts": {}, "require_match": False, "unknown": 1}),
+            json.dumps({"currency_accounts": [], "require_match": False}),
+            json.dumps({"currency_accounts": {"TWD": 123}, "require_match": False}),
+            json.dumps({"currency_accounts": {"$TWD": "assets:cash"}, "require_match": False}),
+            json.dumps({"currency_accounts": {"TWD": "assets:cash ; injected"}, "require_match": False}),
+            json.dumps({"currency_accounts": {"TWD": "expenses:food"}, "require_match": False}),
+            json.dumps({"currency_accounts": {}, "require_match": "false"}),
+            '{"currency_accounts":{},"currency_accounts":{},"require_match":false}',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            path = Path(tmp) / "payment-account-rules.json"
+            for raw in invalid_payloads:
+                with self.subTest(raw=raw):
+                    path.write_text(raw, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "payment account rules"):
+                        _load_payment_account_rules(journal)
+
+    def test_expenses_route_by_resolved_currency_and_add_audit_tags(self):
+        for currency, account in self.RULES["currency_accounts"].items():
+            with self.subTest(currency=currency):
+                record = {
+                    "kind": "expense",
+                    "date": "2026-09-18",
+                    "description": f"{currency} lunch",
+                    "amount": "100",
+                    "tags": ["source:fuzzy-text"],
+                }
+                if currency != "TWD":
+                    record["currency"] = currency
+                payload = {"transactions": [record]}
+                journal, imported, skipped, _ = build_ingest_transactions(
+                    payload,
+                    existing_text="",
+                    payment_account_rules=self.RULES,
+                )
+                self.assertEqual((imported, skipped), (1, 0))
+                self.assertIn(account, journal)
+                self.assertIn("; inferred:payment-account", journal)
+                self.assertIn("; inferred:currency-routing", journal)
+
+    def test_explicit_record_or_default_credit_always_wins(self):
+        cases = (
+            ({"credit": "liabilities:card"}, {}, "liabilities:card"),
+            ({}, {"credit": "assets:cash:explicit"}, "assets:cash:explicit"),
+        )
+        for record_extra, defaults_extra, expected in cases:
+            with self.subTest(expected=expected):
+                payload = {
+                    "defaults": {
+                        "kind": "expense", "date": "2026-09-18", "currency": "TWD",
+                        "tags": ["source:fuzzy-text"], **defaults_extra,
+                    },
+                    "transactions": [{
+                        "description": "Lunch", "amount": "100", **record_extra,
+                    }],
+                }
+                journal, _, _, _ = build_ingest_transactions(
+                    payload, existing_text="", payment_account_rules=self.RULES
+                )
+                self.assertIn(expected, journal)
+                self.assertNotIn("inferred:payment-account", journal)
+                self.assertNotIn("inferred:currency-routing", journal)
+
+    def test_require_match_rejects_unrouted_currency_with_focused_error(self):
+        payload = {
+            "transactions": [{
+                "kind": "expense", "date": "2026-09-18", "currency": "SGD",
+                "description": "Lunch", "amount": "10", "tags": ["source:fuzzy-text"],
+            }]
+        }
+        with self.assertRaisesRegex(ValueError, "SGD.*explicit credit"):
+            build_ingest_transactions(
+                payload, existing_text="", payment_account_rules=self.RULES
+            )
+
+    def test_unmatched_currency_keeps_legacy_cash_fallback_when_not_required(self):
+        payload = {
+            "transactions": [{
+                "kind": "expense", "date": "2026-09-18", "currency": "SGD",
+                "description": "Lunch", "amount": "10", "tags": ["source:fuzzy-text"],
+            }]
+        }
+        journal, _, _, _ = build_ingest_transactions(
+            payload,
+            existing_text="",
+            payment_account_rules={"currency_accounts": {}, "require_match": False},
+        )
+        self.assertIn("assets:cash", journal)
+        self.assertIn("inferred:payment-account", journal)
+        self.assertNotIn("inferred:currency-routing", journal)
+
+    def test_non_expenses_are_not_auto_routed(self):
+        record = {
+            "kind": "income", "date": "2026-09-18", "currency": "JPY",
+            "description": "Salary", "amount": "100", "debit": "assets:bank",
+            "tags": ["source:fuzzy-text"],
+        }
+        with self.assertRaisesRegex(ValueError, "explicit debit and credit"):
+            build_ingest_transactions(
+                {"transactions": [record]},
+                existing_text="",
+                payment_account_rules=self.RULES,
+            )
+
+        record["credit"] = "income:salary"
+        journal, _, _, _ = build_ingest_transactions(
+            {"transactions": [record]},
+            existing_text="",
+            payment_account_rules=self.RULES,
+        )
+        self.assertIn("income:salary", journal)
+        self.assertNotIn("jpy-account", journal)
+        self.assertNotIn("inferred:currency-routing", journal)
+
+    def test_historical_and_structured_expenses_preserve_explicit_source_account(self):
+        for source in ("source:historical-import", "source:structured-csv"):
+            with self.subTest(source=source):
+                explicit = {
+                    "kind": "expense", "date": "2024-01-02", "currency": "JPY",
+                    "description": "Historical lunch", "amount": "120",
+                    "debit": "expenses:food", "credit": "liabilities:legacy-card",
+                    "import_id": "legacy-1", "tags": [source],
+                }
+                journal, _, _, _ = build_ingest_transactions(
+                    {"transactions": [explicit]},
+                    existing_text="",
+                    payment_account_rules=self.RULES,
+                )
+                self.assertIn("liabilities:legacy-card", journal)
+                self.assertNotIn("inferred:currency-routing", journal)
+
+                del explicit["credit"]
+                explicit["import_id"] = "legacy-2"
+                with self.assertRaisesRegex(ValueError, "historical imports require explicit"):
+                    build_ingest_transactions(
+                        {"transactions": [explicit]},
+                        existing_text="",
+                        payment_account_rules=self.RULES,
+                    )
+
+    def test_cli_loads_routes_beside_journal_for_jpy_usd_twd_and_override(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            batch = Path(tmp) / "batch.json"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            (Path(tmp) / "payment-account-rules.json").write_text(
+                json.dumps(self.RULES), encoding="utf-8"
+            )
+            batch.write_text(json.dumps({
+                "defaults": {
+                    "kind": "expense", "date": "2026-09-18",
+                    "tags": ["source:fuzzy-text"],
+                },
+                "transactions": [
+                    {"description": "JPY lunch", "amount": "100", "currency": "JPY"},
+                    {"description": "USD lunch", "amount": "10", "currency": "USD"},
+                    {"description": "TWD lunch", "amount": "300", "currency": "TWD"},
+                    {"description": "Card lunch", "amount": "400", "currency": "TWD",
+                     "credit": "liabilities:card"},
+                ],
+            }), encoding="utf-8")
+            result = subprocess.run(
+                base + ["ingest-json", str(batch)], check=False, capture_output=True, text=True
+            )
+            text = journal.read_text(encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for account in (*self.RULES["currency_accounts"].values(), "liabilities:card"):
+            self.assertIn(account, text)
+        self.assertEqual(text.count("inferred:currency-routing"), 3)
+
+    def test_cli_rejects_unsupported_currency_and_malformed_rules(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            batch = Path(tmp) / "batch.json"
+            rules_path = Path(tmp) / "payment-account-rules.json"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            batch.write_text(json.dumps({"transactions": [{
+                "kind": "expense", "date": "2026-09-18", "currency": "SGD",
+                "description": "SGD lunch", "amount": "10", "tags": ["source:fuzzy-text"],
+            }]}), encoding="utf-8")
+            rules_path.write_text(json.dumps(self.RULES), encoding="utf-8")
+            unsupported = subprocess.run(
+                base + ["ingest-json", str(batch)], check=False, capture_output=True, text=True
+            )
+            rules_path.write_text("{bad json", encoding="utf-8")
+            malformed = subprocess.run(
+                base + ["ingest-json", str(batch)], check=False, capture_output=True, text=True
+            )
+            text = journal.read_text(encoding="utf-8")
+        self.assertNotEqual(unsupported.returncode, 0)
+        self.assertRegex(unsupported.stderr, "SGD.*explicit credit")
+        self.assertNotEqual(malformed.returncode, 0)
+        self.assertIn("Invalid payment account rules", malformed.stderr)
+        self.assertNotIn("SGD lunch", text)
 
 
 class FuzzyIngestTests(unittest.TestCase):

@@ -347,6 +347,64 @@ def classify_description(
     }
 
 
+def _validate_payment_account_rules(payload: object, label: str) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must be an object")
+    expected_fields = {"currency_accounts", "require_match"}
+    unknown_fields = set(payload) - expected_fields
+    missing_fields = expected_fields - set(payload)
+    if unknown_fields:
+        raise ValueError(
+            f"{label} has unknown fields: {', '.join(sorted(unknown_fields))}"
+        )
+    if missing_fields:
+        raise ValueError(
+            f"{label} is missing fields: {', '.join(sorted(missing_fields))}"
+        )
+    currency_accounts = payload["currency_accounts"]
+    if not isinstance(currency_accounts, dict):
+        raise ValueError(f"{label} currency_accounts must be an object")
+    require_match = payload["require_match"]
+    if not isinstance(require_match, bool):
+        raise ValueError(f"{label} require_match must be a boolean")
+
+    validated_accounts: dict[str, str] = {}
+    for raw_currency, raw_account in currency_accounts.items():
+        if not isinstance(raw_currency, str):
+            raise ValueError(f"{label} currency names must be strings")
+        try:
+            currency = _validate_currency(raw_currency)
+        except ValueError as error:
+            raise ValueError(f"{label} has invalid currency {raw_currency!r}: {error}") from error
+        if not isinstance(raw_account, str):
+            raise ValueError(f"{label} route for {currency} must be a string")
+        try:
+            account = _validate_account(raw_account)
+        except ValueError as error:
+            raise ValueError(f"{label} has invalid account for {currency}: {error}") from error
+        if _account_family(account) not in {"assets", "liabilities"}:
+            raise ValueError(
+                f"{label} route for {currency} must be an assets or liabilities account"
+            )
+        validated_accounts[currency] = account
+    return {"currency_accounts": validated_accounts, "require_match": require_match}
+
+
+def _load_payment_account_rules(journal: Path) -> dict:
+    path = journal.parent / "payment-account-rules.json"
+    if not path.exists():
+        return {"currency_accounts": {}, "require_match": False}
+    try:
+        payload = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_nonfinite_json_constant,
+        )
+        return _validate_payment_account_rules(payload, f"Payment account rules in {path}")
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
+        raise ValueError(f"Invalid payment account rules file {path}: {error}") from error
+
+
 def _load_classification_rules(journal: Path) -> list[dict[str, str]]:
     path = journal.parent / "classification-rules.json"
     if not path.exists():
@@ -1692,9 +1750,19 @@ def build_ingest_transactions(
     existing_text: str,
     classification_transactions: Sequence[dict] = (),
     classification_rules: Sequence[dict[str, str]] = (),
+    payment_account_rules: object | None = None,
     today: date | None = None,
 ) -> tuple[str, int, int, list[dict]]:
     """Render agent-normalized fuzzy input as one validated journal addition."""
+    if payment_account_rules is None:
+        payment_rules = {"currency_accounts": {}, "require_match": False}
+    else:
+        payment_rules = _validate_payment_account_rules(
+            payment_account_rules, "Payment account rules"
+        )
+    currency_accounts = payment_rules["currency_accounts"]
+    require_payment_match = payment_rules["require_match"]
+
     if isinstance(payload, list):
         defaults: dict = {}
         records = payload
@@ -1776,15 +1844,35 @@ def build_ingest_transactions(
         )
         has_debit = "debit" in record or "debit" in defaults
         has_credit = "credit" in record or "credit" in defaults
+        raw_default_tags = defaults.get("tags", [])
+        raw_record_tags = record.get("tags", [])
+        is_historical = (
+            isinstance(raw_default_tags, list)
+            and isinstance(raw_record_tags, list)
+            and any(
+                isinstance(tag, str) and tag in HISTORICAL_SOURCE_TAGS
+                for tag in [*raw_default_tags, *raw_record_tags]
+            )
+        )
+        routed_payment_account = False
         if kind == "expense":
             debit = _ingest_string(
                 record.get("debit", defaults.get("debit", "auto")),
                 f"Ingest record {index} debit",
             )
-            credit = _ingest_string(
-                record.get("credit", defaults.get("credit", "assets:cash")),
-                f"Ingest record {index} credit",
-            )
+            if has_credit:
+                raw_credit = record.get("credit", defaults.get("credit"))
+            elif not is_historical and currency in currency_accounts:
+                raw_credit = currency_accounts[currency]
+                routed_payment_account = True
+            elif not is_historical and require_payment_match:
+                raise ValueError(
+                    f"Ingest record {index} has no payment account route for currency "
+                    f"{currency}; provide explicit credit"
+                )
+            else:
+                raw_credit = "assets:cash"
+            credit = _ingest_string(raw_credit, f"Ingest record {index} credit")
         else:
             if not has_debit or not has_credit:
                 raise ValueError(
@@ -1913,6 +2001,8 @@ def build_ingest_transactions(
             tags.append("inferred:date")
         if "credit" not in record and "credit" not in defaults:
             tags.append("inferred:payment-account")
+            if routed_payment_account:
+                tags.append("inferred:currency-routing")
         if "currency" not in record and "currency" not in defaults:
             tags.append("inferred:currency")
         source_tags = [tag for tag in tags if tag.startswith("source:")]
@@ -2400,6 +2490,7 @@ def command_ingest_json(args: argparse.Namespace) -> int:
             existing_text=_read_active_journal_text(args.journal),
             classification_transactions=_load_classification_history(args.journal),
             classification_rules=_load_classification_rules(args.journal),
+            payment_account_rules=_load_payment_account_rules(args.journal),
         )
         if journal_text and not args.preview:
             _append_validated_and_commit_locked(
