@@ -386,7 +386,7 @@ git -C ~/finance log --oneline --decorate -20
 git -C ~/finance diff HEAD~1 -- main.journal
 ```
 
-`hfin check` validates hledger syntax and balance. `hfin audit` reads the root and every included journal under the journal lock, then detects semantic import hazards such as invalid managed tags/account structure, import-ID collisions, bulk-reversed expense/income signs, date-only automated rules mistaken for opening balances, missing IDs on historical rows, and dominant generic descriptions; `--strict` also fails on warnings. Repeated IDs are accepted only for one complete `[1/N]` through `[N/N]` installment set. Neither command replaces reconciliation to source totals.
+`hfin check` validates hledger syntax and balance. `hfin audit` reads the root and every included journal under the journal lock, then detects semantic import hazards such as invalid managed tags/account structure, import-ID collisions, bulk-reversed expense/income signs, date-only automated rules mistaken for opening balances, missing IDs on historical rows, and dominant generic descriptions; `--strict` also fails on warnings. Repeated IDs are accepted only for one complete `[1/N]` through `[N/N]` installment set whose kind and posting form permit installments in the ingest schema. Adjustments, opening balances, and priced or multi-commodity transfers never qualify for this exemption. Neither command replaces reconciliation to source totals.
 
 `hfin undo` immediately reverses the latest journal-changing action while preserving history in a new `Undo finance action: ...` commit. It refuses to remove journal initialization. Do not use destructive Git history rewriting.
 

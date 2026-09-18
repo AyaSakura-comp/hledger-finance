@@ -209,6 +209,7 @@ APPROVED_SOURCE_TAGS = {
 }
 HISTORICAL_SOURCE_TAGS = {"source:structured-csv", "source:historical-import"}
 INGEST_KINDS = {"expense", "income", "transfer", "refund", "opening-balance", "adjustment"}
+INSTALLMENT_KINDS = {"expense", "income", "transfer", "refund"}
 _SOURCE_BOUNDARY_SENTINEL = "\x00hfin-source-boundary\x00"
 
 
@@ -709,7 +710,33 @@ def _installment_amount_vector(transaction: dict) -> tuple[Decimal, ...]:
     )
 
 
+def _ingest_schema_permits_installments(transaction: dict) -> bool:
+    tags = _transaction_tag_values(transaction)
+    kinds = tags.get("kind", [])
+    if len(kinds) != 1 or kinds[0] not in INSTALLMENT_KINDS:
+        return False
+
+    commodities: set[str] = set()
+    for posting in transaction.get("tpostings", []):
+        if posting.get("pcost") is not None or posting.get("pprice") is not None:
+            return False
+        for amount in posting.get("pamount", []):
+            if amount.get("aprice") is not None:
+                return False
+            commodity = amount.get("acommodity")
+            if not commodity:
+                return False
+            commodities.add(str(commodity))
+    return len(commodities) == 1
+
+
 def _is_complete_installment_group(transactions: Sequence[dict]) -> bool:
+    if not transactions or not all(
+        _ingest_schema_permits_installments(transaction)
+        for transaction in transactions
+    ):
+        return False
+
     parts: list[tuple[str, int, int, date, tuple]] = []
     for transaction in transactions:
         description = str(transaction.get("tdescription", "")).strip()

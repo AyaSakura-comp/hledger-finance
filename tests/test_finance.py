@@ -1497,6 +1497,120 @@ class AuditTests(unittest.TestCase):
             {finding["code"] for finding in report["findings"]},
         )
 
+    def test_audit_strict_rejects_real_hledger_adjustments_disguised_as_installments(self):
+        journal_text = (
+            "2024-01-31 Legacy correction [1/2]\n"
+            "    ; kind:adjustment\n"
+            "    ; source:historical-import\n"
+            "    ; import-id:duplicate-adjustment\n"
+            "    assets:bank  10 TWD\n"
+            "    equity:migration:legacy  -10 TWD\n"
+            "\n"
+            "2024-02-29 Legacy correction [2/2]\n"
+            "    ; kind:adjustment\n"
+            "    ; source:historical-import\n"
+            "    ; import-id:duplicate-adjustment\n"
+            "    assets:bank  10 TWD\n"
+            "    equity:migration:legacy  -10 TWD\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "duplicate-adjustment.journal"
+            journal.write_text(journal_text, encoding="utf-8")
+            printed = subprocess.run(
+                ["hledger", "-f", str(journal), "print", "--output-format=json"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            strict_audit = subprocess.run(
+                [
+                    sys.executable,
+                    str(SKILL_DIR / "scripts" / "finance.py"),
+                    "--journal",
+                    str(journal),
+                    "audit",
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(printed.returncode, 0, printed.stderr)
+        transactions = json.loads(printed.stdout)
+        self.assertEqual(len(transactions), 2)
+        self.assertTrue(all(
+            ["kind", "adjustment"] in transaction["ttags"]
+            for transaction in transactions
+        ))
+        report = audit_journal(transactions, journal_text)
+        self.assertIn(
+            "duplicate-import-id",
+            {finding["code"] for finding in report["findings"]},
+        )
+        self.assertEqual(strict_audit.returncode, 2, strict_audit.stderr or strict_audit.stdout)
+
+    def test_audit_strict_rejects_real_hledger_priced_transfer_disguised_as_installments(self):
+        journal_text = (
+            "2024-01-31 FX transfer [1/2]\n"
+            "    ; kind:transfer\n"
+            "    ; source:historical-import\n"
+            "    ; import-id:duplicate-fx-transfer\n"
+            "    assets:bank:usd  10 USD @@ 300 TWD\n"
+            "    assets:bank:twd  -300 TWD\n"
+            "\n"
+            "2024-02-29 FX transfer [2/2]\n"
+            "    ; kind:transfer\n"
+            "    ; source:historical-import\n"
+            "    ; import-id:duplicate-fx-transfer\n"
+            "    assets:bank:usd  10 USD @@ 300 TWD\n"
+            "    assets:bank:twd  -300 TWD\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "duplicate-fx-transfer.journal"
+            journal.write_text(journal_text, encoding="utf-8")
+            printed = subprocess.run(
+                ["hledger", "-f", str(journal), "print", "--output-format=json"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            strict_audit = subprocess.run(
+                [
+                    sys.executable,
+                    str(SKILL_DIR / "scripts" / "finance.py"),
+                    "--journal",
+                    str(journal),
+                    "audit",
+                    "--strict",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(printed.returncode, 0, printed.stderr)
+        transactions = json.loads(printed.stdout)
+        self.assertEqual(len(transactions), 2)
+        self.assertTrue(all(
+            transaction["tpostings"][0]["pamount"][0]["aprice"] is not None
+            for transaction in transactions
+        ))
+        self.assertTrue(all(
+            {
+                amount["acommodity"]
+                for posting in transaction["tpostings"]
+                for amount in posting["pamount"]
+            } == {"USD", "TWD"}
+            for transaction in transactions
+        ))
+        report = audit_journal(transactions, journal_text)
+        self.assertIn(
+            "duplicate-import-id",
+            {finding["code"] for finding in report["findings"]},
+        )
+        self.assertEqual(strict_audit.returncode, 2, strict_audit.stderr or strict_audit.stdout)
+
     def test_audit_rejects_installment_id_group_with_mismatched_metadata(self):
         transactions = [
             self._transaction(
