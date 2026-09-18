@@ -3583,6 +3583,66 @@ class CliWriteBehaviorTests(unittest.TestCase):
         self.assertEqual(head_after, head_before)
         self.assertEqual(index_after, index_before)
 
+    def test_strict_audit_rejects_future_malformed_loan_payment(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        future = date(date.today().year + 20, 1, 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            journal.write_text(
+                f"{future.isoformat()} Future loan [1/1]\n"
+                "    ; source:scheduled-loan\n"
+                "    ; kind:loan-payment\n"
+                "    ; loan-id:future-loan\n"
+                "    ; loan-period:1\n"
+                "    ; loan-total-periods:1\n"
+                "    ; import-id:loan.future-loan.period.1\n"
+                "    (liabilities:loans:future)  100 TWD\n"
+                "    (expenses:interest:loans)  0 TWD\n"
+                "    (assets:bank:checking)  -100 TWD\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--journal",
+                    str(journal),
+                    "audit",
+                    "--strict",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["transaction_count"], 1)
+        self.assertIn(
+            "tagged-transaction-invalid-structure",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+    def test_strict_audit_includes_valid_future_loan_schedule(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        future = date(date.today().year + 20, 1, 8).isoformat()
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            command = self.loan_resume_args()
+            command[command.index("--start") + 1] = future
+            subprocess.run(base + command, check=True, capture_output=True, text=True)
+            result = subprocess.run(
+                base + ["audit", "--strict"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["transaction_count"], 35)
+        self.assertTrue(report["ok"], report["findings"])
+
     def test_audit_command_returns_failure_for_reversed_bulk_expenses(self):
         script = SKILL_DIR / "scripts" / "finance.py"
         with tempfile.TemporaryDirectory() as tmp:
