@@ -89,12 +89,28 @@ Reverse the original economic direction:
 2026-01-01 Loan received
     assets:bank                100000 TWD
     liabilities:loan         -100000 TWD
-
-2026-02-01 Loan payment
-    liabilities:loan            5000 TWD
-    expenses:interest            300 TWD
-    assets:bank                 -5300 TWD
 ```
+
+For a known fixed-payment reducing-balance loan, `hfin loan-resume` calculates monthly interest as `(opening principal × annual rate / 100 / 12)`, rounded with decimal `ROUND_HALF_UP` to the lender's supplied power-of-ten quantum. Every non-final row credits the fixed payment and assigns the remainder to principal. The final row debits the exact remaining principal plus rounded interest, so its payment may differ and the balance reaches exactly zero.
+
+`paid-periods` is the number already completed. Descriptions and stable IDs use absolute numbering, so 25 paid plus 35 remaining produces periods 26 through 60:
+
+```hledger
+2026-10-08 Personal loan payment [26/60]
+    ; source:scheduled-loan
+    ; kind:loan-payment
+    ; loan-id:personal-3200000
+    ; loan-period:26
+    ; loan-total-periods:60
+    ; import-id:loan.personal-3200000.period.26
+    liabilities:loans:personal              52891 TWD
+    expenses:interest:loans                   3338 TWD
+    assets:bank:checking                    -56229 TWD
+```
+
+The command rejects negative amortization and a fixed payment that would pay off before the requested final period. It writes projections, not evidence that the bank charged or settled them; reconcile and correct future rows when actual terms differ.
+
+This differs from `hfin installment`: installments split a purchase amount across months, while loan amortization reduces a current liability and separately recognizes interest.
 
 ## Tags and projects
 

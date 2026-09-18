@@ -77,6 +77,7 @@ hfin add --date 2026-09-17 --description "全聯買菜" --amount 680 \
   --currency TWD --debit auto --credit assets:cash
 hfin classify --description "Uber Eats"
 hfin ingest-json /tmp/agent-normalized-transactions.json
+hfin loan-resume --help
 hfin query --report transactions --period this-month
 hfin stats --period this-month
 hfin visualize --period this-month
@@ -114,6 +115,31 @@ For an ordinary `ingest-json` expense with no `credit` in either the record or d
 ## Historical CSV and app migration
 
 Do not translate an existing export by copying signed amounts into raw hledger postings. Profile the source convention, normalize positive magnitudes with explicit semantic kinds, require stable IDs, keep real merchant descriptions, and represent opening balances as dated balanced transactions—not `=` automated posting rules. Currency routing is only for future fuzzy expense capture: historical and structured imports must preserve each source payment account with explicit `debit` and `credit` and are never auto-routed. Run the complete migration against an isolated journal, reconcile control totals by kind/currency, then require both `hfin check` and `hfin audit --strict` before production import. See [`references/HISTORICAL_IMPORT.md`](references/HISTORICAL_IMPORT.md).
+
+## Resume a reducing-balance loan
+
+Use `loan-resume` for an already-known fixed-payment reducing-balance loan. `--paid-periods 0` is valid for a new full schedule; a resumed schedule uses the current outstanding principal and absolute period counts:
+
+```bash
+hfin loan-resume \
+  --loan-id personal-3200000 \
+  --start 2026-10-08 \
+  --description "Personal loan payment" \
+  --principal 1907335 \
+  --annual-rate 2.1 \
+  --payment 56229 \
+  --paid-periods 25 \
+  --remaining-periods 35 \
+  --currency TWD \
+  --liability liabilities:loans:personal \
+  --interest-account expenses:interest:loans \
+  --payment-account assets:bank:checking \
+  --rounding 1
+```
+
+This writes all 35 future-dated transactions immediately—there is no daemon. Reports include them according to their dates. The first row on 2026-10-08 is principal `52891` plus interest `3338`, totaling `56229`; the final row is principal `56128` plus interest `98`, totaling `56226` and clearing the balance.
+
+Add `--preview` to inspect the complete schedule without changing the journal or Git. Retrying the exact completed schedule is a clean no-op; a partial import-ID collision fails closed for investigation. The command automates bookkeeping only: it does **not** instruct a bank, initiate a withdrawal, or confirm actual settlement. Future entries are projections. Correct them if the bank changes the rate, payment, fees, timing, rounding, or actual charged amount.
 
 ## Automatic expense categorization
 

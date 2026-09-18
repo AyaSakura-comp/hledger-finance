@@ -128,6 +128,8 @@ Always include exactly one approved source tag:
 - `source:pdf`
 - `source:voice-transcript`
 
+`source:scheduled-loan` and `kind:loan-payment` are managed but reserved for deterministic `hfin loan-resume` output. They are deliberately absent from the approved `ingest-json` source and kind lists. Agents must not forge this metadata through fuzzy ingestion; collect and verify the loan terms, then use `loan-resume` so the complete schedule receives stable IDs and strict semantic audit.
+
 On the `ingest-json` path, `source:structured-csv` and `source:historical-import` require explicit date, currency, debit account, and credit account; they reject `auto` categories and `inferred:*` defaults. Currency payment routing is deliberately not applied to these sources: preserve the historical CSV/app source account row by row. The separate positive-expense-only `import-csv` command is the sole exception: it may classify a missing expense category before rendering because it fixes `kind:expense`, validates one explicit payment account, and requires a stable ID for every row. Use `source:messy-csv` only for a small ad-hoc fuzzy extraction, not to bypass historical-migration safeguards.
 
 Do not infer a numeric amount from incomplete digits. Ask one focused question when:
