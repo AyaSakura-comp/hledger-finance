@@ -167,8 +167,31 @@ def _validate_tag(value: str) -> str:
 def _validate_loan_decimal(
     value: Decimal, label: str, *, allow_zero: bool = False
 ) -> Decimal:
+    """Validate a loan input without expanding it to fixed-point text.
+
+    Bounds are inspected directly from Decimal's compact tuple, before any
+    comparison, arithmetic, quantization, or rendering can allocate based on an
+    attacker-controlled exponent.
+    """
     if not isinstance(value, Decimal) or not value.is_finite():
         raise ValueError(f"{label} must be finite")
+    _sign, digits, exponent = value.as_tuple()
+    adjusted_exponent = value.adjusted() if value else 0
+    if abs(adjusted_exponent) > MAX_LOAN_ADJUSTED_EXPONENT:
+        raise ValueError(
+            f"{label} exceeds the safe magnitude limit "
+            f"(adjusted exponent +/-{MAX_LOAN_ADJUSTED_EXPONENT})"
+        )
+    if len(digits) > MAX_LOAN_SIGNIFICANT_DIGITS:
+        raise ValueError(
+            f"{label} exceeds the safe precision limit "
+            f"({MAX_LOAN_SIGNIFICANT_DIGITS} significant digits)"
+        )
+    if max(-exponent, 0) > MAX_LOAN_DECIMAL_PLACES:
+        raise ValueError(
+            f"{label} exceeds the safe scale limit "
+            f"({MAX_LOAN_DECIMAL_PLACES} fractional decimal places)"
+        )
     if value < 0 or (value == 0 and not allow_zero):
         qualifier = "nonnegative" if allow_zero else "positive"
         raise ValueError(f"{label} must be {qualifier}")
@@ -181,7 +204,8 @@ def _validate_rounding_quantum(value: Decimal) -> Decimal:
     The bound keeps loan arithmetic within a useful monetary precision and avoids
     pathological ``Decimal.quantize`` operands that exceed the active context.
     """
-    value = _validate_loan_decimal(value, "Rounding quantum")
+    if not isinstance(value, Decimal) or not value.is_finite() or value <= 0:
+        raise ValueError("Rounding quantum must be positive and finite")
     sign, digits, exponent = value.as_tuple()
     while len(digits) > 1 and digits[-1] == 0:
         digits = digits[:-1]
@@ -250,8 +274,11 @@ MANAGED_KINDS = INGEST_KINDS | {"loan-payment"}
 INSTALLMENT_KINDS = {"expense", "income", "transfer", "refund"}
 # Even a 100-year monthly mortgage fits while attacker-sized schedules do not.
 MAX_LOAN_PERIODS = 1200
-# More precision is not useful for supported money amounts and can exceed Decimal context.
+# Loan values support ordinary mortgages and commodities with up to 18 decimals.
+# These tuple-level bounds are checked before arithmetic or fixed-point rendering.
 MAX_LOAN_DECIMAL_PLACES = 18
+MAX_LOAN_ADJUSTED_EXPONENT = 18
+MAX_LOAN_SIGNIFICANT_DIGITS = 38
 _SOURCE_BOUNDARY_SENTINEL = "\x00hfin-source-boundary\x00"
 
 
@@ -1011,6 +1038,8 @@ def _loan_payment_structure(transaction: dict) -> dict | None:
     return {
         "accounts": role_accounts,
         "commodity": next(iter(commodities)),
+        "principal": principal[0][2],
+        "interest": interest[0][2],
         "payment": -payment[0][2],
     }
 
@@ -1285,20 +1314,18 @@ def _date_only_automated_rule_lines(journal_text: str) -> list[int]:
     return matches
 
 
-def _scheduled_loan_block_amount_status(journal_text: str) -> tuple[int, int]:
-    """Return reserved loan block and non-explicit posting block counts.
+_TRANSACTION_HEADER = re.compile(
+    r"^\d{4}(?P<separator>[-/.])\d{1,2}(?P=separator)\d{1,2}"
+    r"(?:=\d{4}(?P<secondary_separator>[-/.])\d{1,2}(?P=secondary_separator)\d{1,2})?"
+    r"(?:\s+[*!])?(?:\s+\([^()\r\n]*\))?(?:\s|$)"
+)
+_EXPLICIT_POSTING_AMOUNT = re.compile(
+    r".+?(?:\t| {2,})[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:\s+\S.*)?$"
+)
 
-    hledger's JSON output replaces omitted posting amounts with inferred values, so
-    this deliberately narrow source check preserves that provenance for generated
-    ``source:scheduled-loan`` / ``kind:loan-payment`` transactions.
-    """
-    transaction_date = re.compile(r"^\d{4}(?P<separator>[-/.])\d{1,2}(?P=separator)\d{1,2}(?:\s|$)")
-    reserved_tag = re.compile(
-        r"(?:^|[,\s])(?:source\s*:\s*scheduled-loan|kind\s*:\s*loan-payment)(?=$|[,\s])"
-    )
-    explicit_posting = re.compile(
-        r".+?(?:\t| {2,})[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:\s+\S.*)?$"
-    )
+
+def _raw_transaction_blocks(journal_text: str) -> list[list[str]]:
+    """Parse raw transaction blocks for synthetic unit-test fallback only."""
     current: list[str] = []
     blocks: list[list[str]] = []
     in_comment_block = False
@@ -1325,7 +1352,7 @@ def _scheduled_loan_block_amount_status(journal_text: str) -> tuple[int, int]:
             continue
         if in_comment_block:
             continue
-        if top_level and transaction_date.match(line):
+        if top_level and _TRANSACTION_HEADER.match(line):
             finish_transaction()
             current = [line]
         elif top_level and stripped and not stripped.startswith(";"):
@@ -1333,29 +1360,110 @@ def _scheduled_loan_block_amount_status(journal_text: str) -> tuple[int, int]:
         elif current and (not top_level or not stripped):
             current.append(line)
     finish_transaction()
+    return blocks
 
-    reserved_blocks = 0
-    invalid = 0
-    for block in blocks:
-        comments = [line.split(";", 1)[1] for line in block if ";" in line]
-        if not any(reserved_tag.search(comment) for comment in comments):
+
+def _raw_loan_block_status(block: Sequence[str]) -> tuple[bool, set[str]]:
+    """Return (all amounts explicit, leading import IDs) for one exact block.
+
+    Only the header comment and contiguous indented comments before the first
+    posting are transaction-level.  Comments on or after postings cannot claim
+    reserved scheduled-loan metadata.
+    """
+    if not block or _TRANSACTION_HEADER.match(block[0]) is None:
+        return False, set()
+    leading_comments: list[str] = []
+    if ";" in block[0]:
+        leading_comments.append(block[0].split(";", 1)[1])
+    postings: list[str] = []
+    posting_started = False
+    for line in block[1:]:
+        stripped = line.strip()
+        if not stripped:
             continue
-        reserved_blocks += 1
-        postings = []
-        for line in block[1:]:
-            stripped = line.strip()
-            if not stripped or stripped.startswith(";"):
-                continue
-            body = line.lstrip().split(";", 1)[0].rstrip()
-            postings.append(body)
-        if len(postings) != 3 or any(
-            explicit_posting.fullmatch(posting) is None for posting in postings
-        ):
-            invalid += 1
-    return reserved_blocks, invalid
+        if not line[0].isspace():
+            return False, set()
+        if stripped.startswith(";"):
+            if not posting_started:
+                leading_comments.append(stripped[1:])
+            continue
+        posting_started = True
+        postings.append(line.lstrip().split(";", 1)[0].rstrip())
+
+    leading_text = "\n".join(leading_comments)
+    has_source = re.search(
+        r"(?:^|[,\s])source\s*:\s*scheduled-loan(?=$|[,\s])", leading_text
+    )
+    has_kind = re.search(
+        r"(?:^|[,\s])kind\s*:\s*loan-payment(?=$|[,\s])", leading_text
+    )
+    import_ids: set[str] = set()
+    for comment in leading_comments:
+        import_ids.update(_import_ids_in_tag_comment(comment))
+    valid = bool(has_source and has_kind) and len(postings) == 3 and all(
+        _EXPLICIT_POSTING_AMOUNT.fullmatch(posting) is not None for posting in postings
+    )
+    return valid, import_ids
 
 
-def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
+def _source_block_for_transaction(
+    transaction: dict, source_texts: dict[str, str]
+) -> list[str] | None:
+    positions = transaction.get("tsourcepos") or []
+    if len(positions) != 2 or not all(isinstance(item, dict) for item in positions):
+        return None
+    start_position, end_position = positions
+    source_name = start_position.get("sourceName")
+    if (
+        not isinstance(source_name, str)
+        or end_position.get("sourceName") != source_name
+        or source_name not in source_texts
+    ):
+        return None
+    start = start_position.get("sourceLine")
+    end = end_position.get("sourceLine")
+    lines = source_texts[source_name].splitlines()
+    if (
+        type(start) is not int
+        or type(end) is not int
+        or start < 1
+        or end <= start
+        or end > len(lines) + 1
+    ):
+        return None
+    return lines[start - 1 : end - 1]
+
+
+def _scheduled_loan_raw_amounts_are_explicit(
+    transaction: dict,
+    journal_text: str,
+    source_texts: dict[str, str] | None,
+) -> bool:
+    """Correlate one parsed loan transaction to exactly one raw source block."""
+    if source_texts is not None:
+        block = _source_block_for_transaction(transaction, source_texts)
+        return bool(block and _raw_loan_block_status(block)[0])
+
+    # Synthetic tests do not always provide tsourcepos.  Correlate by canonical
+    # import ID instead of global counts; production CLI audit never uses this.
+    tags = _transaction_tag_values(transaction)
+    import_ids = tags.get("import-id", [])
+    if len(import_ids) != 1:
+        return False
+    matching_blocks = []
+    for block in _raw_transaction_blocks(journal_text):
+        _valid, block_ids = _raw_loan_block_status(block)
+        if import_ids[0] in block_ids:
+            matching_blocks.append(block)
+    return len(matching_blocks) == 1 and _raw_loan_block_status(matching_blocks[0])[0]
+
+
+def audit_journal(
+    transactions: Sequence[dict],
+    journal_text: str,
+    *,
+    source_texts: dict[str, str] | None = None,
+) -> dict:
     """Report semantic import hazards that hledger's balance check cannot detect."""
     direction = {
         "expense": {"debit_count": 0, "credit_count": 0, "zero_count": 0, "amounts": defaultdict(Decimal)},
@@ -1376,7 +1484,7 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
     historical_invalid_structures = 0
     adjustment_invalid_tags = 0
     scheduled_loan_invalid_metadata = 0
-    scheduled_loan_claim_count = 0
+    scheduled_loan_implicit_amounts = 0
     scheduled_loan_groups: defaultdict[str, list[dict]] = defaultdict(list)
     import_id_transactions: defaultdict[str, list[dict]] = defaultdict(list)
     descriptions: defaultdict[str, int] = defaultdict(int)
@@ -1396,8 +1504,10 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
         scheduled_loan_claim = (
             "scheduled-loan" in source_values or "loan-payment" in kinds
         )
-        if scheduled_loan_claim:
-            scheduled_loan_claim_count += 1
+        if scheduled_loan_claim and not _scheduled_loan_raw_amounts_are_explicit(
+            transaction, journal_text, source_texts
+        ):
+            scheduled_loan_implicit_amounts += 1
         loan_metadata = _loan_payment_metadata(transaction) if scheduled_loan_claim else None
         if scheduled_loan_claim and loan_metadata is None:
             scheduled_loan_invalid_metadata += 1
@@ -1522,19 +1632,12 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
                 "message": "Scheduled loan transactions require canonical source, kind, bounded loan period/total, description, and import-ID metadata.",
             }
         )
-    raw_loan_blocks, implicit_loan_amounts = _scheduled_loan_block_amount_status(
-        journal_text
-    )
-    implicit_loan_amounts = max(
-        implicit_loan_amounts,
-        abs(scheduled_loan_claim_count - raw_loan_blocks),
-    )
-    if implicit_loan_amounts:
+    if scheduled_loan_implicit_amounts:
         findings.append(
             {
                 "severity": "critical",
                 "code": "scheduled-loan-implicit-posting-amount",
-                "count": implicit_loan_amounts,
+                "count": scheduled_loan_implicit_amounts,
                 "message": "Scheduled loan transactions require exactly three explicit regular posting amounts, including zero interest.",
             }
         )
@@ -3017,6 +3120,67 @@ def _parse_decimal_argument(value: str, label: str) -> Decimal:
         raise ValueError(f"{label} must be a decimal") from error
 
 
+def _loan_payment_semantic_tuple(transaction: dict) -> tuple | None:
+    metadata = _loan_payment_metadata(transaction)
+    structure = _loan_payment_structure(transaction)
+    if metadata is None or structure is None:
+        return None
+    tags = _transaction_tag_values(transaction)
+    return (
+        metadata["date"],
+        metadata["base_description"],
+        metadata["loan_id"],
+        metadata["period"],
+        metadata["total"],
+        tags["import-id"][0],
+        *structure["accounts"],
+        structure["commodity"],
+        structure["principal"],
+        structure["interest"],
+        structure["payment"],
+    )
+
+
+def _expected_loan_payment_semantic_tuple(
+    period: dict,
+    *,
+    loan_id: str,
+    description: str,
+    currency: str,
+    liability_account: str,
+    interest_account: str,
+    payment_account: str,
+) -> tuple:
+    return (
+        period["date"],
+        description,
+        loan_id,
+        period["period"],
+        period["total_periods"],
+        period["import_id"],
+        liability_account,
+        interest_account,
+        payment_account,
+        currency,
+        period["principal"],
+        period["interest"],
+        period["payment"],
+    )
+
+
+def _load_journal_transactions(journal: Path) -> list[dict]:
+    result = _run(
+        ["hledger", "-f", str(journal), "print", "--output-format=json"],
+        capture=True,
+    )
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "Could not read journal transactions")
+    payload = json.loads(result.stdout)
+    if not isinstance(payload, list):
+        raise ValueError("Could not read journal transactions: unexpected JSON shape")
+    return payload
+
+
 def command_loan_resume(args: argparse.Namespace) -> int:
     _ensure_journal(args.journal)
     _require_regular_journal(args.journal)
@@ -3037,10 +3201,42 @@ def command_loan_resume(args: argparse.Namespace) -> int:
             payment_account=args.payment_account,
             rounding_quantum=_parse_decimal_argument(args.rounding, "Rounding quantum"),
         )
-        expected_ids = {row["import_id"] for row in periods}
-        existing_ids = _existing_import_ids(_read_active_journal_text(args.journal))
-        present = expected_ids & existing_ids
+        canonical_loan_id = _validate_import_id(args.loan_id, "Loan ID")
+        canonical_description = _validate_description(args.description)
+        canonical_currency = _validate_currency(args.currency)
+        canonical_liability = _validate_account(args.liability)
+        canonical_interest_account = _validate_account(args.interest_account)
+        canonical_payment_account = _validate_account(args.payment_account)
+        expected_semantics = {
+            row["import_id"]: _expected_loan_payment_semantic_tuple(
+                row,
+                loan_id=canonical_loan_id,
+                description=canonical_description,
+                currency=canonical_currency,
+                liability_account=canonical_liability,
+                interest_account=canonical_interest_account,
+                payment_account=canonical_payment_account,
+            )
+            for row in periods
+        }
+        expected_ids = set(expected_semantics)
+        transactions_by_id: defaultdict[str, list[dict]] = defaultdict(list)
+        for transaction in _load_journal_transactions(args.journal):
+            for import_id in _transaction_tag_values(transaction).get("import-id", []):
+                transactions_by_id[import_id].append(transaction)
+        present = expected_ids & set(transactions_by_id)
         if present == expected_ids:
+            exact = all(
+                len(transactions_by_id[import_id]) == 1
+                and _loan_payment_semantic_tuple(transactions_by_id[import_id][0])
+                == expected_semantics[import_id]
+                for import_id in expected_ids
+            )
+            if not exact:
+                raise ValueError(
+                    "Loan schedule terms-mismatch: existing payments do not exactly "
+                    "match the requested schedule"
+                )
             print(
                 f"Loan schedule already present: {len(expected_ids)} payments",
                 file=sys.stderr,
@@ -3064,19 +3260,64 @@ def command_loan_resume(args: argparse.Namespace) -> int:
     return 0
 
 
-def _read_active_journal_text(journal: Path) -> str:
+def _safe_read_active_journal_source(filename: str) -> str:
+    """Read one hledger-reported active source without following a swapped link."""
+    path = Path(filename)
+    try:
+        inspected = os.lstat(path)
+    except OSError as error:
+        raise ValueError(f"Could not inspect journal source {filename}: {error}") from error
+    if not stat.S_ISREG(inspected.st_mode):
+        raise ValueError(
+            f"Journal source {filename} must be a regular file, not a "
+            f"{_non_regular_file_type(inspected.st_mode)}"
+        )
+    descriptor: int | None = None
+    try:
+        try:
+            descriptor = os.open(
+                path,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+            )
+        except OSError as error:
+            detail = "refusing symlink" if error.errno == errno.ELOOP else str(error)
+            raise ValueError(f"Could not safely open journal source {filename}: {detail}") from error
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError(f"Journal source {filename} changed to a non-regular file")
+        if (opened.st_dev, opened.st_ino) != (inspected.st_dev, inspected.st_ino):
+            raise ValueError(f"Journal source {filename} changed while opening")
+        handle = os.fdopen(descriptor, "r", encoding="utf-8")
+        descriptor = None
+        with handle:
+            return handle.read()
+    except (OSError, UnicodeError) as error:
+        raise ValueError(f"Could not read journal source {filename}: {error}") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _read_active_journal_sources(journal: Path) -> dict[str, str]:
     result = _run(["hledger", "-f", str(journal), "files"], capture=True)
     if result.returncode:
         raise ValueError(result.stderr.strip() or "Could not list active journal files")
-    source_texts: list[str] = []
+    source_texts: dict[str, str] = {}
     for filename in result.stdout.splitlines():
         if not filename.strip():
             continue
-        try:
-            source_texts.append(Path(filename).read_text(encoding="utf-8"))
-        except OSError as error:
-            raise ValueError(f"Could not read journal source {filename}: {error}") from error
-    return f"\n{_SOURCE_BOUNDARY_SENTINEL}\n".join(source_texts)
+        if filename in source_texts:
+            raise ValueError(f"Ambiguous duplicate active journal source: {filename}")
+        source_texts[filename] = _safe_read_active_journal_source(filename)
+    if not source_texts:
+        raise ValueError("Could not identify any active journal source files")
+    return source_texts
+
+
+def _read_active_journal_text(journal: Path) -> str:
+    return f"\n{_SOURCE_BOUNDARY_SENTINEL}\n".join(
+        _read_active_journal_sources(journal).values()
+    )
 
 
 def command_ingest_json(args: argparse.Namespace) -> int:
@@ -3185,7 +3426,10 @@ def command_audit(args: argparse.Namespace) -> int:
     _require_regular_journal(args.journal)
     with _acquire_journal_lock(args.journal):
         _require_regular_journal(args.journal)
-        active_journal_text = _read_active_journal_text(args.journal)
+        active_sources = _read_active_journal_sources(args.journal)
+        active_journal_text = f"\n{_SOURCE_BOUNDARY_SENTINEL}\n".join(
+            active_sources.values()
+        )
         result = _run(
             ["hledger", "-f", str(args.journal), "print", "--output-format=json"],
             capture=True,
@@ -3193,7 +3437,9 @@ def command_audit(args: argparse.Namespace) -> int:
         if result.returncode:
             raise ValueError(result.stderr.strip() or "Could not read journal for audit")
         transactions = json.loads(result.stdout)
-    report = audit_journal(transactions, active_journal_text)
+    report = audit_journal(
+        transactions, active_journal_text, source_texts=active_sources
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if report["critical_count"] or (args.strict and report["warning_count"]):
         return 2

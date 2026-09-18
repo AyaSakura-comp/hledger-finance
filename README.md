@@ -137,9 +137,9 @@ hfin loan-resume \
   --rounding 1
 ```
 
-This writes all 35 future-dated transactions immediately—there is no daemon. Loan schedules are capped at 1200 total monthly periods, and the power-of-ten rounding quantum supports at most 18 decimal places. Reports include future entries according to their dates. The first row on 2026-10-08 is principal `52891` plus interest `3338`, totaling `56229`; the final row is principal `56128` plus interest `98`, totaling `56226` and clearing the balance.
+This writes all 35 future-dated transactions immediately—there is no daemon. Loan schedules are capped at 1200 total monthly periods. Principal, payment, and rate are bounded before arithmetic to an adjusted decimal exponent of ±18, 38 significant digits, and 18 fractional places; this covers ordinary mortgages and commodities with 18-decimal precision without allowing attacker-sized Decimal expansion. The power-of-ten rounding quantum also supports at most 18 decimal places. Reports include future entries according to their dates. The first row on 2026-10-08 is principal `52891` plus interest `3338`, totaling `56229`; the final row is principal `56128` plus interest `98`, totaling `56226` and clearing the balance.
 
-Add `--preview` to inspect the complete schedule without changing the journal or Git. Retrying the exact completed schedule is a clean no-op; a partial import-ID collision fails closed for investigation. The command automates bookkeeping only: it does **not** instruct a bank, initiate a withdrawal, or confirm actual settlement. Future entries are projections. Correct them if the bank changes the rate, payment, fees, timing, rounding, or actual charged amount.
+Add `--preview` to inspect the complete schedule without changing the journal or Git. Retrying is a clean no-op only when every existing payment exactly matches the requested dates, description, metadata, accounts, commodity, principal, interest, and total; any mismatch or partial import-ID collision fails closed for investigation. The command automates bookkeeping only: it does **not** instruct a bank, initiate a withdrawal, or confirm actual settlement. Future entries are projections. Correct them if the bank changes the rate, payment, fees, timing, rounding, or actual charged amount.
 
 ## Automatic expense categorization
 

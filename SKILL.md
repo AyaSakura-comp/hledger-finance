@@ -196,9 +196,9 @@ hfin loan-resume \
   --rounding 1
 ```
 
-Use `--preview` if any source term remains uncertain. A schedule may contain at most 1200 total monthly periods, and its power-of-ten rounding quantum may use at most 18 decimal places. The command writes the remaining dated transactions now; no daemon or future bank connection is involved. It automates bookkeeping only and does not instruct a bank, initiate a withdrawal, or prove actual settlement. Explain that projected entries must be corrected when actual bank rate, payment, fee, timing, rounding, or charged amount differs.
+Use `--preview` if any source term remains uncertain. A schedule may contain at most 1200 total monthly periods. Principal, payment, and rate are bounded before arithmetic to adjusted exponent ±18, 38 significant digits, and 18 fractional places; the power-of-ten rounding quantum may also use at most 18 decimal places. These limits cover ordinary mortgages and 18-decimal commodities. The command writes the remaining dated transactions now; no daemon or future bank connection is involved. It automates bookkeeping only and does not instruct a bank, initiate a withdrawal, or prove actual settlement. Explain that projected entries must be corrected when actual bank rate, payment, fee, timing, rounding, or charged amount differs.
 
-A retry for which every expected import ID already exists is a no-op. A nonempty partial collision is a safety failure: investigate the journal and source terms; do not delete entries merely to force a retry. `paid-periods=0` generates a complete schedule beginning at period 1. This principal/interest model is distinct from `hfin installment`, which divides a purchase amount.
+A retry for which every expected import ID already exists is a no-op only when every existing payment's date, description/period, reserved metadata, account roles, commodity, principal, interest, and total exactly match the requested schedule. Any terms mismatch or nonempty partial collision is a safety failure: investigate the journal and source terms; do not delete entries merely to force a retry. `paid-periods=0` generates a complete schedule beginning at period 1. This principal/interest model is distinct from `hfin installment`, which divides a purchase amount.
 
 ## Existing CSV, app export, or historical data
 

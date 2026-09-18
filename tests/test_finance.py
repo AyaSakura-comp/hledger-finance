@@ -295,8 +295,26 @@ class LoanResumeScheduleTests(unittest.TestCase):
         )
         self.assertEqual(len(periods), 3)
 
+    def test_rejects_loan_values_outside_documented_magnitude_and_scale_limits(self):
+        cases = (
+            ("principal", "1e-1000000000"),
+            ("principal", "1e1000000000"),
+            ("payment", "1e-1000000000"),
+            ("payment", "1e1000000000"),
+            ("annual_rate", "1e-1000000000"),
+            ("annual_rate", "1e1000000000"),
+            ("principal", "123456789012345678901234567890123456789"),
+            ("payment", "1.0000000000000000001"),
+        )
+        for field, text in cases:
+            with self.subTest(field=field, text=text):
+                with self.assertRaisesRegex(ValueError, "safe (magnitude|precision|scale)"):
+                    build_loan_resume_schedule(
+                        **{**self._valid_kwargs(), field: Decimal(text)}
+                    )
+
     def test_decimal_arithmetic_failures_are_reported_as_value_errors(self):
-        with self.assertRaisesRegex(ValueError, "Loan arithmetic"):
+        with self.assertRaisesRegex(ValueError, "safe magnitude"):
             build_loan_resume_schedule(
                 **{
                     **self._valid_kwargs(),
@@ -2114,6 +2132,110 @@ class AuditTests(unittest.TestCase):
                     {finding["code"] for finding in report["findings"]},
                 )
 
+    def test_cli_strict_audit_correlates_secondary_date_and_rejects_posting_tag_spoof(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        header = (
+            "2026-01-31=2026-02-01 * (AUTO) Audit loan [1/1]\n"
+            "    ; source:scheduled-loan\n"
+            "    ; kind:loan-payment\n"
+            "    ; loan-id:audit-loan\n"
+            "    ; loan-period:1\n"
+            "    ; loan-total-periods:1\n"
+            "    ; import-id:loan.audit-loan.period.1\n"
+        )
+        spoof = (
+            "\n2026-02-02 Unrelated transaction\n"
+            "    expenses:test  1 TWD  ; source:scheduled-loan\n"
+            "    expenses:other  0 TWD\n"
+            "    assets:cash  -1 TWD\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            journal.write_text(
+                header
+                + "    liabilities:loans:audit  100 TWD\n"
+                + "    expenses:interest:loans  0 TWD\n"
+                + "    assets:bank:checking\n"
+                + spoof,
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(script), "--journal", str(journal), "audit", "--strict"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn(
+            "scheduled-loan-implicit-posting-amount",
+            {finding["code"] for finding in json.loads(result.stdout)["findings"]},
+        )
+
+    def test_cli_strict_audit_accepts_secondary_date_status_code_header(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        journal_text, _transactions = self._loan_transactions(remaining_periods=1)
+        journal_text = journal_text.replace(
+            "2026-01-31 Audit loan", "2026-01-31=2026-02-01 * (AUTO) Audit loan", 1
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            journal.write_text(journal_text, encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(script), "--journal", str(journal), "audit", "--strict"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
+    def test_cli_strict_audit_correlates_each_omitted_amount_in_included_source(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        journal_text, _transactions = self._loan_transactions(remaining_periods=1)
+        posting_accounts = (
+            "liabilities:loans:audit",
+            "expenses:interest:loans",
+            "assets:bank:checking",
+        )
+        for omitted_index, account in enumerate(posting_accounts):
+            with self.subTest(omitted_index=omitted_index), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "main.journal"
+                included = Path(tmp) / "loans.journal"
+                root.write_text("include loans.journal\n", encoding="utf-8")
+                lines = journal_text.splitlines()
+                line_index = next(
+                    index for index, line in enumerate(lines) if line.strip().startswith(account)
+                )
+                lines[line_index] = "    " + account
+                included.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                result = subprocess.run(
+                    [sys.executable, str(script), "--journal", str(root), "audit", "--strict"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+                self.assertIn(
+                    "scheduled-loan-implicit-posting-amount",
+                    {finding["code"] for finding in json.loads(result.stdout)["findings"]},
+                )
+
+    def test_cli_strict_audit_accepts_valid_included_loan_source(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        journal_text, _transactions = self._loan_transactions(remaining_periods=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "main.journal"
+            included = Path(tmp) / "loans.journal"
+            root.write_text("include loans.journal\n", encoding="utf-8")
+            included.write_text(journal_text, encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(script), "--journal", str(root), "audit", "--strict"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
     def test_audit_raw_loan_validation_ignores_comment_blocks_and_accepts_formatting(self):
         journal, transactions = self._loan_transactions(remaining_periods=1)
         source = (
@@ -3537,6 +3659,41 @@ class CliWriteBehaviorTests(unittest.TestCase):
             self.assertIn(message, result.stderr)
             self.assertNotIn("Traceback", result.stderr)
 
+    def test_loan_resume_rejects_extreme_decimal_exponents_without_write(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            before = journal.read_bytes()
+            head_before = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            results = []
+            for option in ("--principal", "--payment", "--annual-rate"):
+                for value in ("1e-1000000000", "1e1000000000"):
+                    command = self.loan_resume_args()
+                    command[command.index(option) + 1] = value
+                    results.append(
+                        subprocess.run(base + command, check=False, capture_output=True, text=True)
+                    )
+            after = journal.read_bytes()
+            head_after = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        for result in results:
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertRegex(result.stderr, "safe (magnitude|scale)")
+        self.assertEqual(after, before)
+        self.assertEqual(head_after, head_before)
+
     def test_loan_resume_writes_future_transactions_immediately(self):
         script = SKILL_DIR / "scripts" / "finance.py"
         with tempfile.TemporaryDirectory() as tmp:
@@ -3609,6 +3766,90 @@ class CliWriteBehaviorTests(unittest.TestCase):
                 ),
                 1,
             )
+
+    def test_loan_resume_all_ids_require_exact_schedule_semantics(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        changes = (
+            ("--annual-rate", "2.2"),
+            ("--payment", "56228"),
+            ("--principal", "1907336"),
+            ("--start", "2026-10-09"),
+            ("--liability", "liabilities:loans:changed"),
+            ("--interest-account", "expenses:interest:changed"),
+            ("--payment-account", "assets:bank:changed"),
+            ("--currency", "USD"),
+            ("--description", "Changed loan payment"),
+        )
+        for option, value in changes:
+            with self.subTest(option=option), tempfile.TemporaryDirectory() as tmp:
+                journal = Path(tmp) / "main.journal"
+                base = [sys.executable, str(script), "--journal", str(journal)]
+                subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+                subprocess.run(base + self.loan_resume_args(), check=True, capture_output=True, text=True)
+                before = journal.read_bytes()
+                head_before = subprocess.run(
+                    ["git", "-C", tmp, "rev-parse", "HEAD"], check=True,
+                    capture_output=True, text=True,
+                ).stdout.strip()
+                command = self.loan_resume_args()
+                command[command.index(option) + 1] = value
+                result = subprocess.run(base + command, check=False, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("terms-mismatch", result.stderr)
+                self.assertEqual(journal.read_bytes(), before)
+                self.assertEqual(
+                    subprocess.run(
+                        ["git", "-C", tmp, "rev-parse", "HEAD"], check=True,
+                        capture_output=True, text=True,
+                    ).stdout.strip(),
+                    head_before,
+                )
+
+    def test_loan_resume_rejects_tampered_root_and_included_schedules(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        for location in ("root", "included"):
+            with self.subTest(location=location), tempfile.TemporaryDirectory() as tmp:
+                journal = Path(tmp) / "main.journal"
+                base = [sys.executable, str(script), "--journal", str(journal)]
+                subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+                subprocess.run(base + self.loan_resume_args(), check=True, capture_output=True, text=True)
+                original = journal.read_text(encoding="utf-8")
+                prefix, schedule = original.split("2026-10-08 Personal loan payment", 1)
+                schedule = "2026-10-08 Personal loan payment" + schedule
+                schedule = schedule.replace("52891 TWD", "52890 TWD", 1).replace(
+                    "-56229 TWD", "-56228 TWD", 1
+                )
+                if location == "root":
+                    journal.write_text(prefix + schedule, encoding="utf-8")
+                else:
+                    included = Path(tmp) / "loans.journal"
+                    included.write_text(schedule, encoding="utf-8")
+                    journal.write_text(prefix + "include loans.journal\n", encoding="utf-8")
+                subprocess.run(["git", "-C", tmp, "add", "-A"], check=True)
+                subprocess.run(["git", "-C", tmp, "commit", "-qm", "tamper fixture"], check=True)
+                before = journal.read_bytes()
+                included_before = (
+                    (Path(tmp) / "loans.journal").read_bytes() if location == "included" else None
+                )
+                head_before = subprocess.run(
+                    ["git", "-C", tmp, "rev-parse", "HEAD"], check=True,
+                    capture_output=True, text=True,
+                ).stdout.strip()
+                result = subprocess.run(
+                    base + self.loan_resume_args(), check=False, capture_output=True, text=True
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("terms-mismatch", result.stderr)
+                self.assertEqual(journal.read_bytes(), before)
+                if included_before is not None:
+                    self.assertEqual((Path(tmp) / "loans.journal").read_bytes(), included_before)
+                self.assertEqual(
+                    subprocess.run(
+                        ["git", "-C", tmp, "rev-parse", "HEAD"], check=True,
+                        capture_output=True, text=True,
+                    ).stdout.strip(),
+                    head_before,
+                )
 
     def test_loan_resume_partial_collision_fails_closed(self):
         script = SKILL_DIR / "scripts" / "finance.py"
