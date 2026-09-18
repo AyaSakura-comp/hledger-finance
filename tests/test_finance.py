@@ -31,6 +31,7 @@ from scripts.finance import (  # noqa: E402
     _load_payment_account_rules,
     add_months,
     build_hledger_query,
+    build_loan_resume_schedule,
     build_ingest_transactions,
     build_visualization_data,
     classify_description,
@@ -97,6 +98,62 @@ class InstallmentTests(unittest.TestCase):
         self.assertIn("2026-12-31 Phone [3/3]", journal)
         self.assertIn("expenses:fees", journal)
         self.assertIn("-35.34 TWD", journal)
+
+
+class LoanResumeScheduleTests(unittest.TestCase):
+    def test_exact_resumed_schedule_uses_half_up_interest_and_clears_balance(self):
+        journal, periods = build_loan_resume_schedule(
+            loan_id="personal-3200000",
+            start=date(2026, 10, 8),
+            description="Personal loan payment",
+            principal=Decimal("1907335"),
+            annual_rate=Decimal("2.1"),
+            payment=Decimal("56229"),
+            paid_periods=25,
+            remaining_periods=35,
+            currency="TWD",
+            liability_account="liabilities:loans:personal",
+            interest_account="expenses:interest:loans",
+            payment_account="assets:bank:checking",
+            rounding_quantum=Decimal("1"),
+        )
+
+        self.assertEqual(len(periods), 35)
+        self.assertEqual(
+            periods[0],
+            {
+                "period": 26,
+                "total_periods": 60,
+                "date": date(2026, 10, 8),
+                "opening_principal": Decimal("1907335"),
+                "principal": Decimal("52891"),
+                "interest": Decimal("3338"),
+                "payment": Decimal("56229"),
+                "closing_principal": Decimal("1854444"),
+                "import_id": "loan.personal-3200000.period.26",
+            },
+        )
+        self.assertEqual(periods[-1]["period"], 60)
+        self.assertEqual(periods[-1]["principal"], Decimal("56128"))
+        self.assertEqual(periods[-1]["interest"], Decimal("98"))
+        self.assertEqual(periods[-1]["payment"], Decimal("56226"))
+        self.assertEqual(periods[-1]["closing_principal"], Decimal("0"))
+        self.assertTrue(
+            all(period["payment"] == Decimal("56229") for period in periods[:-1])
+        )
+        self.assertEqual(
+            sum((period["principal"] for period in periods), Decimal("0")),
+            Decimal("1907335"),
+        )
+        import_ids = [period["import_id"] for period in periods]
+        self.assertEqual(len(import_ids), len(set(import_ids)))
+        self.assertIn("2026-10-08 Personal loan payment [26/60]", journal)
+        self.assertIn("liabilities:loans:personal", journal)
+        self.assertIn("expenses:interest:loans", journal)
+        self.assertIn("assets:bank:checking", journal)
+        self.assertIn("; import-id:loan.personal-3200000.period.26", journal)
+        self.assertIn("; import-id:loan.personal-3200000.period.60", journal)
+        self.assertEqual(journal.count("; source:scheduled-loan"), 35)
 
 
 class RenderingSafetyTests(unittest.TestCase):

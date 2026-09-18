@@ -20,7 +20,7 @@ import tempfile
 import unicodedata
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -595,6 +595,109 @@ def render_cross_currency_transfer(
     )
     lines.append(f"    {credit_account:<40}  -{_decimal_text(amount)} {currency}")
     return "\n".join(lines) + "\n\n"
+
+
+def _loan_import_id(loan_id: str, period: int) -> str:
+    return f"loan.{loan_id}.period.{period}"
+
+
+def render_loan_payment(
+    *,
+    txn_date: date,
+    description: str,
+    loan_id: str,
+    period: int,
+    total_periods: int,
+    principal: Decimal,
+    interest: Decimal,
+    currency: str,
+    liability_account: str,
+    interest_account: str,
+    payment_account: str,
+) -> str:
+    tags = (
+        "source:scheduled-loan",
+        "kind:loan-payment",
+        f"loan-id:{loan_id}",
+        f"loan-period:{period}",
+        f"loan-total-periods:{total_periods}",
+        f"import-id:{_loan_import_id(loan_id, period)}",
+    )
+    lines = [f"{txn_date.isoformat()} {description} [{period}/{total_periods}]"]
+    lines.extend(f"    ; {_validate_tag(tag)}" for tag in tags)
+    lines.append(f"    {liability_account:<40}  {_decimal_text(principal)} {currency}")
+    lines.append(f"    {interest_account:<40}  {_decimal_text(interest)} {currency}")
+    lines.append(
+        f"    {payment_account:<40}  -{_decimal_text(principal + interest)} {currency}"
+    )
+    return "\n".join(lines) + "\n\n"
+
+
+def build_loan_resume_schedule(
+    *,
+    loan_id: str,
+    start: date,
+    description: str,
+    principal: Decimal,
+    annual_rate: Decimal,
+    payment: Decimal,
+    paid_periods: int,
+    remaining_periods: int,
+    currency: str,
+    liability_account: str,
+    interest_account: str,
+    payment_account: str,
+    rounding_quantum: Decimal,
+) -> tuple[str, list[dict]]:
+    total_periods = paid_periods + remaining_periods
+    monthly_rate = annual_rate / Decimal("100") / Decimal("12")
+    balance = principal
+    chunks: list[str] = []
+    periods: list[dict] = []
+    for offset in range(remaining_periods):
+        absolute_period = paid_periods + offset + 1
+        txn_date = add_months(start, offset)
+        opening = balance
+        interest = (balance * monthly_rate).quantize(
+            rounding_quantum, rounding=ROUND_HALF_UP
+        )
+        final = offset == remaining_periods - 1
+        principal_part = balance if final else payment - interest
+        payment_total = principal_part + interest
+        closing = balance - principal_part
+        import_id = _loan_import_id(loan_id, absolute_period)
+        periods.append(
+            {
+                "period": absolute_period,
+                "total_periods": total_periods,
+                "date": txn_date,
+                "opening_principal": opening,
+                "principal": principal_part,
+                "interest": interest,
+                "payment": payment_total,
+                "closing_principal": closing,
+                "import_id": import_id,
+            }
+        )
+        chunks.append(
+            render_loan_payment(
+                txn_date=txn_date,
+                description=description,
+                loan_id=loan_id,
+                period=absolute_period,
+                total_periods=total_periods,
+                principal=principal_part,
+                interest=interest,
+                currency=currency,
+                liability_account=liability_account,
+                interest_account=interest_account,
+                payment_account=payment_account,
+            )
+        )
+        balance = closing
+    if balance != 0:
+        raise ValueError("Loan schedule did not clear the outstanding principal")
+    return "".join(chunks), periods
 
 
 def render_installments(
