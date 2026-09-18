@@ -514,6 +514,90 @@ class PaymentAccountRoutingTests(unittest.TestCase):
             rules = _load_payment_account_rules(Path(tmp) / "main.journal")
         self.assertEqual(rules, {"currency_accounts": {}, "require_match": False})
 
+    def test_rules_loader_accepts_a_valid_regular_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            (Path(tmp) / "payment-account-rules.json").write_text(
+                json.dumps(self.RULES), encoding="utf-8"
+            )
+            self.assertEqual(_load_payment_account_rules(journal), self.RULES)
+
+    def test_rules_loader_rejects_symlinks_including_dangling_and_looping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for case in ("regular-target", "dangling", "loop"):
+                with self.subTest(case=case):
+                    case_dir = root / case
+                    case_dir.mkdir()
+                    path = case_dir / "payment-account-rules.json"
+                    if case == "regular-target":
+                        target = case_dir / "target.json"
+                        target.write_text(json.dumps(self.RULES), encoding="utf-8")
+                        path.symlink_to(target)
+                    elif case == "dangling":
+                        path.symlink_to(case_dir / "missing.json")
+                    else:
+                        path.symlink_to(path.name)
+                    with self.assertRaisesRegex(ValueError, "symlink"):
+                        _load_payment_account_rules(case_dir / "main.journal")
+
+    def test_rules_loader_rejects_fifo_without_blocking(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "payment-account-rules.json"
+            os.mkfifo(path)
+            probe = (
+                "from pathlib import Path; "
+                "from scripts.finance import _load_payment_account_rules; "
+                "journal = Path(__import__('sys').argv[1]); "
+                "\ntry: _load_payment_account_rules(journal)"
+                "\nexcept ValueError as error: assert 'regular file' in str(error), error"
+                "\nelse: raise AssertionError('FIFO was accepted')"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", probe, str(Path(tmp) / "main.journal")],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+                cwd=SKILL_DIR,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rules_loader_rejects_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "payment-account-rules.json"
+            path.mkdir()
+            with self.assertRaisesRegex(ValueError, "regular file"):
+                _load_payment_account_rules(Path(tmp) / "main.journal")
+
+    def test_rules_loader_does_not_treat_filesystem_errors_as_absence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            with mock.patch(
+                "scripts.finance.os.lstat", side_effect=PermissionError("permission denied")
+            ):
+                with self.assertRaisesRegex(ValueError, "inspect.*permission denied"):
+                    _load_payment_account_rules(journal)
+
+    def test_rules_loader_does_not_follow_a_symlink_swapped_in_before_open(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "payment-account-rules.json"
+            target = root / "target.json"
+            raw_rules = json.dumps(self.RULES)
+            path.write_text(raw_rules, encoding="utf-8")
+            target.write_text(raw_rules, encoding="utf-8")
+            real_open = os.open
+
+            def swap_then_open(open_path, flags, *args, **kwargs):
+                path.unlink()
+                path.symlink_to(target)
+                return real_open(open_path, flags, *args, **kwargs)
+
+            with mock.patch("scripts.finance.os.open", side_effect=swap_then_open):
+                with self.assertRaisesRegex(ValueError, "symlink"):
+                    _load_payment_account_rules(root / "main.journal")
+
     def test_rules_file_uses_a_strict_non_executable_schema(self):
         invalid_payloads = (
             "{not json",

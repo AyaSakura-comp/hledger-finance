@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import calendar
 import csv
+import errno
 import fcntl
 import hashlib
 import json
@@ -390,18 +391,96 @@ def _validate_payment_account_rules(payload: object, label: str) -> dict:
     return {"currency_accounts": validated_accounts, "require_match": require_match}
 
 
+def _non_regular_file_type(mode: int) -> str:
+    if stat.S_ISLNK(mode):
+        return "symlink"
+    if stat.S_ISDIR(mode):
+        return "directory"
+    if stat.S_ISFIFO(mode):
+        return "FIFO"
+    if stat.S_ISCHR(mode):
+        return "character device"
+    if stat.S_ISBLK(mode):
+        return "block device"
+    if stat.S_ISSOCK(mode):
+        return "socket"
+    return "non-regular filesystem entry"
+
+
 def _load_payment_account_rules(journal: Path) -> dict:
     path = journal.parent / "payment-account-rules.json"
-    if not path.exists():
-        return {"currency_accounts": {}, "require_match": False}
+    default_rules = {"currency_accounts": {}, "require_match": False}
+    try:
+        inspected = os.lstat(path)
+    except FileNotFoundError:
+        return default_rules
+    except OSError as error:
+        raise ValueError(
+            f"Invalid payment account rules file {path}: could not inspect path: {error}"
+        ) from error
+
+    if not stat.S_ISREG(inspected.st_mode):
+        file_type = _non_regular_file_type(inspected.st_mode)
+        raise ValueError(
+            f"Invalid payment account rules file {path}: must be a regular file, "
+            f"not a {file_type}"
+        )
+
+    descriptor: int | None = None
+    try:
+        try:
+            descriptor = os.open(
+                path,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+            )
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                detail = "refusing symlink encountered while opening"
+            elif error.errno == errno.ENOENT:
+                detail = "file disappeared while opening"
+            else:
+                detail = f"could not safely open file: {error}"
+            raise ValueError(f"Invalid payment account rules file {path}: {detail}") from error
+
+        try:
+            opened = os.fstat(descriptor)
+        except OSError as error:
+            raise ValueError(
+                f"Invalid payment account rules file {path}: "
+                f"could not inspect opened file: {error}"
+            ) from error
+        if not stat.S_ISREG(opened.st_mode):
+            file_type = _non_regular_file_type(opened.st_mode)
+            raise ValueError(
+                f"Invalid payment account rules file {path}: opened object must be a "
+                f"regular file, not a {file_type}"
+            )
+        if (opened.st_dev, opened.st_ino) != (inspected.st_dev, inspected.st_ino):
+            raise ValueError(
+                f"Invalid payment account rules file {path}: file changed while opening"
+            )
+
+        try:
+            handle = os.fdopen(descriptor, "r", encoding="utf-8")
+            descriptor = None
+            with handle:
+                raw_payload = handle.read()
+        except (OSError, UnicodeError) as error:
+            raise ValueError(
+                f"Invalid payment account rules file {path}: could not read file: {error}"
+            ) from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
     try:
         payload = json.loads(
-            path.read_text(encoding="utf-8"),
+            raw_payload,
             object_pairs_hook=_reject_duplicate_json_keys,
             parse_constant=_reject_nonfinite_json_constant,
         )
         return _validate_payment_account_rules(payload, f"Payment account rules in {path}")
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
+    except (json.JSONDecodeError, ValueError) as error:
         raise ValueError(f"Invalid payment account rules file {path}: {error}") from error
 
 
