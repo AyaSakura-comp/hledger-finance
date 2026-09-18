@@ -29,6 +29,7 @@ from scripts.finance import (  # noqa: E402
     _chart_amount,
     _ellipsize,
     _load_payment_account_rules,
+    MAX_LOAN_PERIODS,
     add_months,
     build_hledger_query,
     build_loan_resume_schedule,
@@ -261,6 +262,48 @@ class LoanResumeScheduleTests(unittest.TestCase):
             with self.subTest(field=field, value=value):
                 with self.assertRaisesRegex(ValueError, message):
                     build_loan_resume_schedule(**{**self._valid_kwargs(), field: value})
+
+    def test_rejects_period_inputs_and_total_above_defensive_limit(self):
+        cases = (
+            ({"paid_periods": MAX_LOAN_PERIODS + 1}, "paid periods.*1200"),
+            ({"remaining_periods": MAX_LOAN_PERIODS + 1}, "remaining periods.*1200"),
+            (
+                {"paid_periods": MAX_LOAN_PERIODS, "remaining_periods": 1},
+                "total periods.*1200",
+            ),
+        )
+        for changes, message in cases:
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(ValueError, message):
+                    build_loan_resume_schedule(**{**self._valid_kwargs(), **changes})
+
+    def test_rejects_rounding_quantum_beyond_documented_precision(self):
+        for value in ("1e-19", "1e-1000"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "18 decimal places"):
+                    build_loan_resume_schedule(
+                        **{
+                            **self._valid_kwargs(),
+                            "rounding_quantum": Decimal(value),
+                        }
+                    )
+        _journal, periods = build_loan_resume_schedule(
+            **{
+                **self._valid_kwargs(),
+                "rounding_quantum": Decimal("1e-18"),
+            }
+        )
+        self.assertEqual(len(periods), 3)
+
+    def test_decimal_arithmetic_failures_are_reported_as_value_errors(self):
+        with self.assertRaisesRegex(ValueError, "Loan arithmetic"):
+            build_loan_resume_schedule(
+                **{
+                    **self._valid_kwargs(),
+                    "principal": Decimal("1e999999"),
+                    "annual_rate": Decimal("1"),
+                }
+            )
 
     def test_rejects_unsupported_rounding_quantums(self):
         for value in ("0", "-0.01", "NaN", "Infinity", "10", "0.05"):
@@ -1997,6 +2040,97 @@ class AuditTests(unittest.TestCase):
                     {finding["code"] for finding in report["findings"]},
                 )
 
+    def test_audit_rejects_adversarial_scheduled_loan_period_metadata(self):
+        _journal, transactions = self._loan_transactions(remaining_periods=1)
+        original = transactions[0]
+        cases = (
+            ("huge", str(sys.maxsize + 1)),
+            ("negative", "-1"),
+            ("zero", "0"),
+            ("over-limit", str(MAX_LOAN_PERIODS + 1)),
+        )
+        for tag_name in ("loan-period", "loan-total-periods"):
+            for name, adversarial_value in cases:
+                with self.subTest(tag_name=tag_name, name=name):
+                    transaction = self._copy_transaction(original)
+                    transaction["ttags"] = [
+                        [name, adversarial_value if name == tag_name else value]
+                        for name, value in transaction["ttags"]
+                    ]
+                    if tag_name == "loan-period":
+                        transaction["tdescription"] = (
+                            f"Audit loan [{adversarial_value}/1]"
+                        )
+                    else:
+                        transaction["tdescription"] = (
+                            f"Audit loan [1/{adversarial_value}]"
+                        )
+                    report = audit_journal([transaction], "")
+                    self.assertIn(
+                        "scheduled-loan-invalid-metadata",
+                        {finding["code"] for finding in report["findings"]},
+                    )
+
+    def test_audit_fails_closed_when_reserved_loan_raw_source_is_unavailable(self):
+        _journal, transactions = self._loan_transactions(remaining_periods=1)
+        report = audit_journal(transactions, "")
+        self.assertIn(
+            "scheduled-loan-implicit-posting-amount",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+    def test_audit_rejects_real_hledger_implicit_loan_posting_amounts(self):
+        header = (
+            "2026-01-31 Audit loan [1/1]\n"
+            "    ; source:scheduled-loan\n"
+            "    ; kind:loan-payment\n"
+            "    ; loan-id:audit-loan\n"
+            "    ; loan-period:1\n"
+            "    ; loan-total-periods:1\n"
+            "    ; import-id:loan.audit-loan.period.1\n"
+        )
+        posting_lines = (
+            "    liabilities:loans:audit  100 TWD",
+            "    expenses:interest:loans  0 TWD",
+            "    assets:bank:checking  -100 TWD",
+        )
+        for omitted_index, role in enumerate(("principal", "interest", "payment")):
+            with self.subTest(role=role), tempfile.TemporaryDirectory() as tmp:
+                lines = list(posting_lines)
+                lines[omitted_index] = lines[omitted_index].rsplit("  ", 1)[0]
+                journal_text = header + "\n".join(lines) + "\n"
+                path = Path(tmp) / "loan.journal"
+                path.write_text(journal_text, encoding="utf-8")
+                printed = subprocess.run(
+                    ["hledger", "-f", str(path), "print", "--output-format=json"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(printed.returncode, 0, printed.stderr)
+                report = audit_journal(json.loads(printed.stdout), journal_text)
+                self.assertIn(
+                    "scheduled-loan-implicit-posting-amount",
+                    {finding["code"] for finding in report["findings"]},
+                )
+
+    def test_audit_raw_loan_validation_ignores_comment_blocks_and_accepts_formatting(self):
+        journal, transactions = self._loan_transactions(remaining_periods=1)
+        source = (
+            "comment\n"
+            "2026-01-01 Fake [1/1]\n"
+            "    ; source:scheduled-loan\n"
+            "    liabilities:fake\n"
+            "end comment\n"
+            f"\n{journal.replace('  300 TWD', '  300 TWD  ; explicit principal')}"
+        )
+        report = audit_journal(transactions, source)
+        self.assertNotIn(
+            "scheduled-loan-implicit-posting-amount",
+            {finding["code"] for finding in report["findings"]},
+        )
+        self.assertTrue(report["ok"], report["findings"])
+
     def test_audit_rejects_invalid_scheduled_loan_posting_shapes(self):
         _journal, transactions = self._loan_transactions()
         original = transactions[0]
@@ -3376,6 +3510,33 @@ class CliWriteBehaviorTests(unittest.TestCase):
         self.assertEqual(after, before)
         self.assertEqual(head_after, head)
 
+    def test_loan_resume_rejects_excessive_periods_and_precision_without_traceback(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            cases = (
+                ("--remaining-periods", str(MAX_LOAN_PERIODS + 1), "1200"),
+                ("--rounding", "1e-1000", "18 decimal places"),
+            )
+            results = []
+            for option, value, _message in cases:
+                command = self.loan_resume_args()
+                command[command.index(option) + 1] = value
+                results.append(
+                    subprocess.run(
+                        base + command,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                )
+        for result, (_option, _value, message) in zip(results, cases):
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(message, result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
     def test_loan_resume_writes_future_transactions_immediately(self):
         script = SKILL_DIR / "scripts" / "finance.py"
         with tempfile.TemporaryDirectory() as tmp:
@@ -3619,6 +3780,55 @@ class CliWriteBehaviorTests(unittest.TestCase):
         self.assertEqual(report["transaction_count"], 1)
         self.assertIn(
             "tagged-transaction-invalid-structure",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+    def test_strict_audit_rejects_implicit_amount_in_included_loan_source(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "main.journal"
+            included = Path(tmp) / "loans.journal"
+            root.write_text(
+                "comment\n"
+                "2026-01-01 Ignored fake loan [1/1]\n"
+                "    ; kind:loan-payment\n"
+                "    liabilities:fake\n"
+                "end comment\n"
+                "include loans.journal\n",
+                encoding="utf-8",
+            )
+            included.write_text(
+                "2026-01-31 Included loan [1/1]\n"
+                "    ; source:scheduled-loan\n"
+                "    ; kind:loan-payment\n"
+                "    ; loan-id:included-loan\n"
+                "    ; loan-period:1\n"
+                "    ; loan-total-periods:1\n"
+                "    ; import-id:loan.included-loan.period.1\n"
+                "    liabilities:loans:included  100 TWD  ; principal\n"
+                "    expenses:interest:loans  0 TWD\n"
+                "    ; payment amount is deliberately omitted\n"
+                "    assets:bank:checking\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--journal",
+                    str(root),
+                    "audit",
+                    "--strict",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+        report = json.loads(result.stdout)
+        self.assertIn(
+            "scheduled-loan-implicit-posting-amount",
             {finding["code"] for finding in report["findings"]},
         )
 

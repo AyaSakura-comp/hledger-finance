@@ -20,7 +20,7 @@ import tempfile
 import unicodedata
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, DecimalException, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -176,11 +176,23 @@ def _validate_loan_decimal(
 
 
 def _validate_rounding_quantum(value: Decimal) -> Decimal:
+    """Return a power-of-ten quantum with at most 18 decimal places.
+
+    The bound keeps loan arithmetic within a useful monetary precision and avoids
+    pathological ``Decimal.quantize`` operands that exceed the active context.
+    """
     value = _validate_loan_decimal(value, "Rounding quantum")
-    normalized = value.normalize()
-    if normalized > 1 or normalized.as_tuple().digits != (1,):
+    sign, digits, exponent = value.as_tuple()
+    while len(digits) > 1 and digits[-1] == 0:
+        digits = digits[:-1]
+        exponent += 1
+    if sign or digits != (1,) or exponent > 0:
         raise ValueError("Rounding quantum must be a power of ten no greater than 1")
-    return normalized
+    if exponent < -MAX_LOAN_DECIMAL_PLACES:
+        raise ValueError(
+            f"Rounding quantum supports at most {MAX_LOAN_DECIMAL_PLACES} decimal places"
+        )
+    return Decimal((0, (1,), exponent))
 
 
 def _accounts_conflict(left: str, right: str) -> bool:
@@ -236,6 +248,10 @@ INGEST_KINDS = {"expense", "income", "transfer", "refund", "opening-balance", "a
 MANAGED_SOURCE_TAGS = APPROVED_SOURCE_TAGS | {"source:scheduled-loan"}
 MANAGED_KINDS = INGEST_KINDS | {"loan-payment"}
 INSTALLMENT_KINDS = {"expense", "income", "transfer", "refund"}
+# Even a 100-year monthly mortgage fits while attacker-sized schedules do not.
+MAX_LOAN_PERIODS = 1200
+# More precision is not useful for supported money amounts and can exceed Decimal context.
+MAX_LOAN_DECIMAL_PLACES = 18
 _SOURCE_BOUNDARY_SENTINEL = "\x00hfin-source-boundary\x00"
 
 
@@ -692,10 +708,17 @@ def build_loan_resume_schedule(
         raise ValueError("paid periods must be an integer")
     if paid_periods < 0:
         raise ValueError("paid periods must be nonnegative")
+    if paid_periods > MAX_LOAN_PERIODS:
+        raise ValueError(f"paid periods must not exceed {MAX_LOAN_PERIODS}")
     if type(remaining_periods) is not int:
         raise ValueError("remaining periods must be an integer")
     if remaining_periods <= 0:
         raise ValueError("remaining periods must be positive")
+    if remaining_periods > MAX_LOAN_PERIODS:
+        raise ValueError(f"remaining periods must not exceed {MAX_LOAN_PERIODS}")
+    total_periods = paid_periods + remaining_periods
+    if total_periods > MAX_LOAN_PERIODS:
+        raise ValueError(f"total periods must not exceed {MAX_LOAN_PERIODS}")
     if _account_family(liability_account) != "liabilities":
         raise ValueError("Loan account must be in liabilities")
     if _account_family(interest_account) != "expenses":
@@ -710,62 +733,64 @@ def build_loan_resume_schedule(
     ):
         raise ValueError("Loan role accounts must not overlap")
 
-    total_periods = paid_periods + remaining_periods
-    monthly_rate = annual_rate / Decimal("100") / Decimal("12")
-    balance = principal
-    chunks: list[str] = []
-    periods: list[dict] = []
-    for offset in range(remaining_periods):
-        absolute_period = paid_periods + offset + 1
-        txn_date = add_months(start, offset)
-        opening = balance
-        interest = (balance * monthly_rate).quantize(
-            rounding_quantum, rounding=ROUND_HALF_UP
-        )
-        final = offset == remaining_periods - 1
-        principal_part = balance if final else payment - interest
-        if not final and principal_part <= 0:
-            raise ValueError(f"Loan period {absolute_period} has negative amortization")
-        if not final and principal_part >= balance:
-            raise ValueError(
-                f"Loan would pay off before final period {total_periods}; "
-                "correct the remaining periods"
+    try:
+        monthly_rate = annual_rate / Decimal("100") / Decimal("12")
+        balance = principal
+        chunks: list[str] = []
+        periods: list[dict] = []
+        for offset in range(remaining_periods):
+            absolute_period = paid_periods + offset + 1
+            txn_date = add_months(start, offset)
+            opening = balance
+            interest = (balance * monthly_rate).quantize(
+                rounding_quantum, rounding=ROUND_HALF_UP
             )
-        payment_total = principal_part + interest
-        closing = balance - principal_part
-        import_id = _loan_import_id(loan_id, absolute_period)
-        periods.append(
-            {
-                "period": absolute_period,
-                "total_periods": total_periods,
-                "date": txn_date,
-                "opening_principal": opening,
-                "principal": principal_part,
-                "interest": interest,
-                "payment": payment_total,
-                "closing_principal": closing,
-                "import_id": import_id,
-            }
-        )
-        chunks.append(
-            render_loan_payment(
-                txn_date=txn_date,
-                description=description,
-                loan_id=loan_id,
-                period=absolute_period,
-                total_periods=total_periods,
-                principal=principal_part,
-                interest=interest,
-                currency=currency,
-                liability_account=liability_account,
-                interest_account=interest_account,
-                payment_account=payment_account,
+            final = offset == remaining_periods - 1
+            principal_part = balance if final else payment - interest
+            if not final and principal_part <= 0:
+                raise ValueError(f"Loan period {absolute_period} has negative amortization")
+            if not final and principal_part >= balance:
+                raise ValueError(
+                    f"Loan would pay off before final period {total_periods}; "
+                    "correct the remaining periods"
+                )
+            payment_total = principal_part + interest
+            closing = balance - principal_part
+            import_id = _loan_import_id(loan_id, absolute_period)
+            periods.append(
+                {
+                    "period": absolute_period,
+                    "total_periods": total_periods,
+                    "date": txn_date,
+                    "opening_principal": opening,
+                    "principal": principal_part,
+                    "interest": interest,
+                    "payment": payment_total,
+                    "closing_principal": closing,
+                    "import_id": import_id,
+                }
             )
-        )
-        balance = closing
-    if balance != 0:
-        raise ValueError("Loan schedule did not clear the outstanding principal")
-    return "".join(chunks), periods
+            chunks.append(
+                render_loan_payment(
+                    txn_date=txn_date,
+                    description=description,
+                    loan_id=loan_id,
+                    period=absolute_period,
+                    total_periods=total_periods,
+                    principal=principal_part,
+                    interest=interest,
+                    currency=currency,
+                    liability_account=liability_account,
+                    interest_account=interest_account,
+                    payment_account=payment_account,
+                )
+            )
+            balance = closing
+        if balance != 0:
+            raise ValueError("Loan schedule did not clear the outstanding principal")
+        return "".join(chunks), periods
+    except DecimalException as error:
+        raise ValueError(f"Loan arithmetic failed: {error}") from error
 
 
 def render_installments(
@@ -898,12 +923,18 @@ def _loan_payment_metadata(transaction: dict) -> dict | None:
         return None
     period_text = tags["loan-period"][0]
     total_text = tags["loan-total-periods"][0]
-    if not re.fullmatch(r"[1-9]\d*", period_text) or not re.fullmatch(
-        r"[1-9]\d*", total_text
+    maximum_text = str(MAX_LOAN_PERIODS)
+    if (
+        not re.fullmatch(r"[1-9]\d*", period_text)
+        or not re.fullmatch(r"[1-9]\d*", total_text)
+        or len(period_text) > len(maximum_text)
+        or len(total_text) > len(maximum_text)
     ):
         return None
     period = int(period_text)
     total = int(total_text)
+    if period > MAX_LOAN_PERIODS or total > MAX_LOAN_PERIODS:
+        return None
     if period > total or tags["import-id"][0] != _loan_import_id(loan_id, period):
         return None
     description = str(transaction.get("tdescription", "")).strip()
@@ -1002,7 +1033,11 @@ def _loan_schedule_group_is_valid(rows: Sequence[dict]) -> bool:
     if len(periods) != len(set(periods)):
         return False
     first_period = min(periods)
-    if sorted(periods) != list(range(first_period, total + 1)):
+    ordered_periods = sorted(periods)
+    if len(periods) != total - first_period + 1 or any(
+        period != first_period + offset
+        for offset, period in enumerate(ordered_periods)
+    ):
         return False
     by_period = {row["period"]: row for row in rows}
     first_date = by_period[first_period]["date"]
@@ -1250,6 +1285,76 @@ def _date_only_automated_rule_lines(journal_text: str) -> list[int]:
     return matches
 
 
+def _scheduled_loan_block_amount_status(journal_text: str) -> tuple[int, int]:
+    """Return reserved loan block and non-explicit posting block counts.
+
+    hledger's JSON output replaces omitted posting amounts with inferred values, so
+    this deliberately narrow source check preserves that provenance for generated
+    ``source:scheduled-loan`` / ``kind:loan-payment`` transactions.
+    """
+    transaction_date = re.compile(r"^\d{4}(?P<separator>[-/.])\d{1,2}(?P=separator)\d{1,2}(?:\s|$)")
+    reserved_tag = re.compile(
+        r"(?:^|[,\s])(?:source\s*:\s*scheduled-loan|kind\s*:\s*loan-payment)(?=$|[,\s])"
+    )
+    explicit_posting = re.compile(
+        r".+?(?:\t| {2,})[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:\s+\S.*)?$"
+    )
+    current: list[str] = []
+    blocks: list[list[str]] = []
+    in_comment_block = False
+
+    def finish_transaction() -> None:
+        nonlocal current
+        if current:
+            blocks.append(current)
+            current = []
+
+    for line in journal_text.splitlines():
+        if line == _SOURCE_BOUNDARY_SENTINEL:
+            finish_transaction()
+            in_comment_block = False
+            continue
+        stripped = line.strip()
+        top_level = line == line.lstrip()
+        if top_level and stripped == "comment":
+            finish_transaction()
+            in_comment_block = True
+            continue
+        if top_level and stripped == "end comment":
+            in_comment_block = False
+            continue
+        if in_comment_block:
+            continue
+        if top_level and transaction_date.match(line):
+            finish_transaction()
+            current = [line]
+        elif top_level and stripped and not stripped.startswith(";"):
+            finish_transaction()
+        elif current and (not top_level or not stripped):
+            current.append(line)
+    finish_transaction()
+
+    reserved_blocks = 0
+    invalid = 0
+    for block in blocks:
+        comments = [line.split(";", 1)[1] for line in block if ";" in line]
+        if not any(reserved_tag.search(comment) for comment in comments):
+            continue
+        reserved_blocks += 1
+        postings = []
+        for line in block[1:]:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            body = line.lstrip().split(";", 1)[0].rstrip()
+            postings.append(body)
+        if len(postings) != 3 or any(
+            explicit_posting.fullmatch(posting) is None for posting in postings
+        ):
+            invalid += 1
+    return reserved_blocks, invalid
+
+
 def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
     """Report semantic import hazards that hledger's balance check cannot detect."""
     direction = {
@@ -1271,6 +1376,7 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
     historical_invalid_structures = 0
     adjustment_invalid_tags = 0
     scheduled_loan_invalid_metadata = 0
+    scheduled_loan_claim_count = 0
     scheduled_loan_groups: defaultdict[str, list[dict]] = defaultdict(list)
     import_id_transactions: defaultdict[str, list[dict]] = defaultdict(list)
     descriptions: defaultdict[str, int] = defaultdict(int)
@@ -1290,6 +1396,8 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
         scheduled_loan_claim = (
             "scheduled-loan" in source_values or "loan-payment" in kinds
         )
+        if scheduled_loan_claim:
+            scheduled_loan_claim_count += 1
         loan_metadata = _loan_payment_metadata(transaction) if scheduled_loan_claim else None
         if scheduled_loan_claim and loan_metadata is None:
             scheduled_loan_invalid_metadata += 1
@@ -1411,7 +1519,23 @@ def audit_journal(transactions: Sequence[dict], journal_text: str) -> dict:
                 "severity": "critical",
                 "code": "scheduled-loan-invalid-metadata",
                 "count": scheduled_loan_invalid_metadata,
-                "message": "Scheduled loan transactions require canonical source, kind, loan period, total, description, and import-ID metadata.",
+                "message": "Scheduled loan transactions require canonical source, kind, bounded loan period/total, description, and import-ID metadata.",
+            }
+        )
+    raw_loan_blocks, implicit_loan_amounts = _scheduled_loan_block_amount_status(
+        journal_text
+    )
+    implicit_loan_amounts = max(
+        implicit_loan_amounts,
+        abs(scheduled_loan_claim_count - raw_loan_blocks),
+    )
+    if implicit_loan_amounts:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "scheduled-loan-implicit-posting-amount",
+                "count": implicit_loan_amounts,
+                "message": "Scheduled loan transactions require exactly three explicit regular posting amounts, including zero interest.",
             }
         )
     invalid_loan_schedules = sorted(
