@@ -164,6 +164,29 @@ def _validate_tag(value: str) -> str:
     return cleaned
 
 
+def _validate_loan_decimal(
+    value: Decimal, label: str, *, allow_zero: bool = False
+) -> Decimal:
+    if not isinstance(value, Decimal) or not value.is_finite():
+        raise ValueError(f"{label} must be finite")
+    if value < 0 or (value == 0 and not allow_zero):
+        qualifier = "nonnegative" if allow_zero else "positive"
+        raise ValueError(f"{label} must be {qualifier}")
+    return value
+
+
+def _validate_rounding_quantum(value: Decimal) -> Decimal:
+    value = _validate_loan_decimal(value, "Rounding quantum")
+    normalized = value.normalize()
+    if normalized > 1 or normalized.as_tuple().digits != (1,):
+        raise ValueError("Rounding quantum must be a power of ten no greater than 1")
+    return normalized
+
+
+def _accounts_conflict(left: str, right: str) -> bool:
+    return left == right or left.startswith(right + ":") or right.startswith(left + ":")
+
+
 def _account_family(account: str) -> str | None:
     root = account.split(":", 1)[0]
     return root if root in {"assets", "liabilities", "expenses", "income", "equity"} else None
@@ -649,6 +672,42 @@ def build_loan_resume_schedule(
     payment_account: str,
     rounding_quantum: Decimal,
 ) -> tuple[str, list[dict]]:
+    if type(start) is not date:
+        raise ValueError("Start must be a date")
+    loan_id = _validate_import_id(loan_id, "Loan ID")
+    if not loan_id:
+        raise ValueError("Loan ID must not be empty")
+    description = _validate_description(description)
+    currency = _validate_currency(currency)
+    liability_account = _validate_account(liability_account)
+    interest_account = _validate_account(interest_account)
+    payment_account = _validate_account(payment_account)
+    principal = _validate_loan_decimal(principal, "principal")
+    annual_rate = _validate_loan_decimal(annual_rate, "annual rate", allow_zero=True)
+    payment = _validate_loan_decimal(payment, "payment")
+    rounding_quantum = _validate_rounding_quantum(rounding_quantum)
+    if type(paid_periods) is not int:
+        raise ValueError("paid periods must be an integer")
+    if paid_periods < 0:
+        raise ValueError("paid periods must be nonnegative")
+    if type(remaining_periods) is not int:
+        raise ValueError("remaining periods must be an integer")
+    if remaining_periods <= 0:
+        raise ValueError("remaining periods must be positive")
+    if _account_family(liability_account) != "liabilities":
+        raise ValueError("Loan account must be in liabilities")
+    if _account_family(interest_account) != "expenses":
+        raise ValueError("Interest account must be in expenses")
+    if _account_family(payment_account) not in {"assets", "liabilities"}:
+        raise ValueError("Payment account must be in assets or liabilities")
+    role_accounts = (liability_account, interest_account, payment_account)
+    if any(
+        _accounts_conflict(left, right)
+        for index, left in enumerate(role_accounts)
+        for right in role_accounts[index + 1 :]
+    ):
+        raise ValueError("Loan role accounts must not overlap")
+
     total_periods = paid_periods + remaining_periods
     monthly_rate = annual_rate / Decimal("100") / Decimal("12")
     balance = principal
@@ -663,6 +722,13 @@ def build_loan_resume_schedule(
         )
         final = offset == remaining_periods - 1
         principal_part = balance if final else payment - interest
+        if not final and principal_part <= 0:
+            raise ValueError(f"Loan period {absolute_period} has negative amortization")
+        if not final and principal_part >= balance:
+            raise ValueError(
+                f"Loan would pay off before final period {total_periods}; "
+                "correct the remaining periods"
+            )
         payment_total = principal_part + interest
         closing = balance - principal_part
         import_id = _loan_import_id(loan_id, absolute_period)

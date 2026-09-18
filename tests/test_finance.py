@@ -218,6 +218,119 @@ class LoanResumeScheduleTests(unittest.TestCase):
         self.assertEqual(periods[-1]["closing_principal"], Decimal("0.00"))
         self.assertIn("1 USD", journal)
 
+    @staticmethod
+    def _valid_kwargs():
+        return {
+            "loan_id": "safe-loan",
+            "start": date(2026, 1, 1),
+            "description": "Loan payment",
+            "principal": Decimal("300"),
+            "annual_rate": Decimal("0"),
+            "payment": Decimal("100"),
+            "paid_periods": 0,
+            "remaining_periods": 3,
+            "currency": "TWD",
+            "liability_account": "liabilities:loans:personal",
+            "interest_account": "expenses:interest:loans",
+            "payment_account": "assets:bank:checking",
+            "rounding_quantum": Decimal("1"),
+        }
+
+    def test_rejects_invalid_decimal_inputs(self):
+        cases = (
+            ("principal", Decimal("0"), "principal.*positive"),
+            ("principal", Decimal("NaN"), "principal.*finite"),
+            ("annual_rate", Decimal("-0.01"), "annual rate.*nonnegative"),
+            ("annual_rate", Decimal("Infinity"), "annual rate.*finite"),
+            ("payment", Decimal("0"), "payment.*positive"),
+            ("payment", Decimal("NaN"), "payment.*finite"),
+        )
+        for field, value, message in cases:
+            with self.subTest(field=field, value=value):
+                with self.assertRaisesRegex(ValueError, message):
+                    build_loan_resume_schedule(**{**self._valid_kwargs(), field: value})
+
+    def test_rejects_invalid_period_counts(self):
+        cases = (
+            ("paid_periods", -1, "paid periods.*nonnegative"),
+            ("paid_periods", True, "paid periods.*integer"),
+            ("remaining_periods", 0, "remaining periods.*positive"),
+            ("remaining_periods", Decimal("2"), "remaining periods.*integer"),
+        )
+        for field, value, message in cases:
+            with self.subTest(field=field, value=value):
+                with self.assertRaisesRegex(ValueError, message):
+                    build_loan_resume_schedule(**{**self._valid_kwargs(), field: value})
+
+    def test_rejects_unsupported_rounding_quantums(self):
+        for value in ("0", "-0.01", "NaN", "Infinity", "10", "0.05"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "Rounding quantum"):
+                    build_loan_resume_schedule(
+                        **{
+                            **self._valid_kwargs(),
+                            "rounding_quantum": Decimal(value),
+                        }
+                    )
+
+    def test_rejects_invalid_loan_ids(self):
+        for loan_id in ("", "loan/id", "loan id; forged", "貸款"):
+            with self.subTest(loan_id=loan_id):
+                with self.assertRaisesRegex(ValueError, "Loan ID"):
+                    build_loan_resume_schedule(
+                        **{**self._valid_kwargs(), "loan_id": loan_id}
+                    )
+
+    def test_rejects_negative_amortization_and_early_payoff(self):
+        with self.assertRaisesRegex(ValueError, "negative amortization"):
+            build_loan_resume_schedule(
+                **{
+                    **self._valid_kwargs(),
+                    "principal": Decimal("1000"),
+                    "annual_rate": Decimal("120"),
+                    "payment": Decimal("100"),
+                }
+            )
+        with self.assertRaisesRegex(ValueError, "pay off before final period"):
+            build_loan_resume_schedule(
+                **{
+                    **self._valid_kwargs(),
+                    "principal": Decimal("100"),
+                    "payment": Decimal("100"),
+                }
+            )
+
+    def test_rejects_unsafe_text_and_wrong_account_roles(self):
+        cases = (
+            ({"description": "Loan; forged"}, "Description"),
+            ({"currency": "TWD; forged"}, "Currency"),
+            ({"liability_account": "(liabilities:loan)"}, "Account"),
+            ({"liability_account": "assets:loan"}, "Loan account.*liabilities"),
+            ({"interest_account": "assets:interest"}, "Interest account.*expenses"),
+            ({"payment_account": "expenses:cash"}, "Payment account.*assets.*liabilities"),
+        )
+        for changes, message in cases:
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(ValueError, message):
+                    build_loan_resume_schedule(**{**self._valid_kwargs(), **changes})
+
+    def test_rejects_conflicting_role_accounts(self):
+        cases = (
+            {"payment_account": "liabilities:loans:personal"},
+            {"payment_account": "liabilities:loans"},
+            {"payment_account": "liabilities:loans:personal:checking"},
+        )
+        for changes in cases:
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(ValueError, "accounts.*overlap"):
+                    build_loan_resume_schedule(**{**self._valid_kwargs(), **changes})
+
+    def test_rejects_non_date_start(self):
+        with self.assertRaisesRegex(ValueError, "Start.*date"):
+            build_loan_resume_schedule(
+                **{**self._valid_kwargs(), "start": "2026-01-01"}
+            )
+
 
 class RenderingSafetyTests(unittest.TestCase):
     def test_render_transaction_rejects_hledger_grammar_in_text_fields(self):
