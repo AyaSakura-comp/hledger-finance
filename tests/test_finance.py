@@ -155,6 +155,69 @@ class LoanResumeScheduleTests(unittest.TestCase):
         self.assertIn("; import-id:loan.personal-3200000.period.60", journal)
         self.assertEqual(journal.count("; source:scheduled-loan"), 35)
 
+    def test_schedule_reuses_month_clamping_and_absolute_numbering_from_zero(self):
+        _journal, periods = build_loan_resume_schedule(
+            loan_id="zero-paid",
+            start=date(2026, 1, 31),
+            description="Loan",
+            principal=Decimal("300"),
+            annual_rate=Decimal("0"),
+            payment=Decimal("100"),
+            paid_periods=0,
+            remaining_periods=3,
+            currency="TWD",
+            liability_account="liabilities:loan",
+            interest_account="expenses:interest",
+            payment_account="assets:bank",
+            rounding_quantum=Decimal("1"),
+        )
+        self.assertEqual([row["period"] for row in periods], [1, 2, 3])
+        self.assertEqual(
+            [row["date"] for row in periods],
+            [date(2026, 1, 31), date(2026, 2, 28), date(2026, 3, 31)],
+        )
+
+    def test_zero_rate_keeps_explicit_zero_interest_postings(self):
+        journal, periods = build_loan_resume_schedule(
+            loan_id="zero-rate",
+            start=date(2026, 4, 1),
+            description="Zero-rate loan",
+            principal=Decimal("200"),
+            annual_rate=Decimal("0"),
+            payment=Decimal("100"),
+            paid_periods=0,
+            remaining_periods=2,
+            currency="TWD",
+            liability_account="liabilities:loan",
+            interest_account="expenses:interest",
+            payment_account="assets:bank",
+            rounding_quantum=Decimal("1"),
+        )
+        self.assertTrue(all(row["interest"] == 0 for row in periods))
+        self.assertEqual(journal.count("expenses:interest"), len(periods))
+        self.assertIn("0 TWD", journal)
+
+    def test_decimal_currency_rounds_half_up_to_requested_quantum(self):
+        journal, periods = build_loan_resume_schedule(
+            loan_id="decimal-usd",
+            start=date(2026, 1, 15),
+            description="USD loan",
+            principal=Decimal("100.00"),
+            annual_rate=Decimal("12"),
+            payment=Decimal("34.00"),
+            paid_periods=0,
+            remaining_periods=3,
+            currency="USD",
+            liability_account="liabilities:loan:usd",
+            interest_account="expenses:interest:usd",
+            payment_account="assets:bank:usd",
+            rounding_quantum=Decimal("0.01"),
+        )
+        self.assertEqual(periods[0]["interest"], Decimal("1.00"))
+        self.assertEqual(periods[0]["principal"], Decimal("33.00"))
+        self.assertEqual(periods[-1]["closing_principal"], Decimal("0.00"))
+        self.assertIn("1 USD", journal)
+
 
 class RenderingSafetyTests(unittest.TestCase):
     def test_render_transaction_rejects_hledger_grammar_in_text_fields(self):
