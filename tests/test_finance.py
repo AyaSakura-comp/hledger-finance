@@ -3063,6 +3063,185 @@ class CliWriteBehaviorTests(unittest.TestCase):
         self.assertIn("2026-10-08 Personal loan payment [26/60]", printed)
         self.assertIn("2029-08-08 Personal loan payment [60/60]", printed)
 
+    def test_loan_resume_rerun_is_noop(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            first = subprocess.run(
+                base + self.loan_resume_args(),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            first_bytes = journal.read_bytes()
+            first_head = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            second = subprocess.run(
+                base + self.loan_resume_args(),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            second_bytes = journal.read_bytes()
+            second_head = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("already present", second.stderr)
+        self.assertEqual(second_bytes, first_bytes)
+        self.assertEqual(second_head, first_head)
+        for period in range(26, 61):
+            self.assertEqual(
+                second_bytes.count(
+                    f"; import-id:loan.personal-3200000.period.{period}".encode()
+                ),
+                1,
+            )
+
+    def test_loan_resume_partial_collision_fails_closed(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            included = Path(tmp) / "history.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            included.write_text(
+                "2026-10-08 Existing collision\n"
+                "    ; import-id:loan.personal-3200000.period.26\n"
+                "    expenses:test  1 TWD\n"
+                "    assets:cash  -1 TWD\n",
+                encoding="utf-8",
+            )
+            journal.write_text(
+                journal.read_text(encoding="utf-8") + "include history.journal\n",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                ["git", "-C", tmp, "add", "main.journal", "history.journal"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", tmp, "commit", "-qm", "Add collision fixture"],
+                check=True,
+            )
+            root_before = journal.read_bytes()
+            included_before = included.read_bytes()
+            head_before = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            result = subprocess.run(
+                base + self.loan_resume_args(),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            head_after = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            root_after = journal.read_bytes()
+            included_after = included.read_bytes()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Partial loan schedule", result.stderr)
+        self.assertEqual(root_after, root_before)
+        self.assertEqual(included_after, included_before)
+        self.assertEqual(head_after, head_before)
+
+    def test_concurrent_loan_resume_writes_schedule_once(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            lock = _acquire_journal_lock(journal)
+            try:
+                processes = [
+                    subprocess.Popen(
+                        base + self.loan_resume_args(),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    for _ in range(2)
+                ]
+                time.sleep(0.3)
+                self.assertTrue(all(process.poll() is None for process in processes))
+            finally:
+                lock.close()
+            results = [process.communicate(timeout=15) for process in processes]
+            text = journal.read_text(encoding="utf-8")
+            subjects = subprocess.run(
+                ["git", "-C", tmp, "log", "--format=%s"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()
+        for process, (stdout, stderr) in zip(processes, results):
+            self.assertEqual(process.returncode, 0, stderr or stdout)
+        self.assertEqual(text.count("; source:scheduled-loan"), 35)
+        self.assertEqual(
+            subjects.count("Add remaining loan schedule: Personal loan payment"), 1
+        )
+
+    def test_loan_resume_restores_journal_when_git_commit_fails(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            hook = Path(tmp) / ".git" / "hooks" / "pre-commit"
+            hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            hook.chmod(0o755)
+            before = journal.read_bytes()
+            head_before = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            index_before = subprocess.run(
+                ["git", "-C", tmp, "diff", "--cached", "--binary"],
+                check=True,
+                capture_output=True,
+            ).stdout
+            result = subprocess.run(
+                base + self.loan_resume_args(),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            head_after = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            index_after = subprocess.run(
+                ["git", "-C", tmp, "diff", "--cached", "--binary"],
+                check=True,
+                capture_output=True,
+            ).stdout
+            after = journal.read_bytes()
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(after, before)
+        self.assertEqual(head_after, head_before)
+        self.assertEqual(index_after, index_before)
+
     def test_audit_command_returns_failure_for_reversed_bulk_expenses(self):
         script = SKILL_DIR / "scripts" / "finance.py"
         with tempfile.TemporaryDirectory() as tmp:
