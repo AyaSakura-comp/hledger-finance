@@ -2708,6 +2708,60 @@ def command_installment(args: argparse.Namespace) -> int:
     return _print_preview_or_append(args, transaction, f"Add {args.count} installments: {args.description}")
 
 
+def _parse_decimal_argument(value: str, label: str) -> Decimal:
+    try:
+        return Decimal(value)
+    except InvalidOperation as error:
+        raise ValueError(f"{label} must be a decimal") from error
+
+
+def command_loan_resume(args: argparse.Namespace) -> int:
+    _ensure_journal(args.journal)
+    _require_regular_journal(args.journal)
+    with _acquire_journal_lock(args.journal):
+        _require_regular_journal(args.journal)
+        schedule, periods = build_loan_resume_schedule(
+            loan_id=args.loan_id,
+            start=date.fromisoformat(args.start),
+            description=args.description,
+            principal=_parse_decimal_argument(args.principal, "Principal"),
+            annual_rate=_parse_decimal_argument(args.annual_rate, "Annual rate"),
+            payment=_parse_decimal_argument(args.payment, "Payment"),
+            paid_periods=args.paid_periods,
+            remaining_periods=args.remaining_periods,
+            currency=args.currency,
+            liability_account=args.liability,
+            interest_account=args.interest_account,
+            payment_account=args.payment_account,
+            rounding_quantum=_parse_decimal_argument(args.rounding, "Rounding quantum"),
+        )
+        expected_ids = {row["import_id"] for row in periods}
+        existing_ids = _existing_import_ids(_read_active_journal_text(args.journal))
+        present = expected_ids & existing_ids
+        if present == expected_ids:
+            print(
+                f"Loan schedule already present: {len(expected_ids)} payments",
+                file=sys.stderr,
+            )
+            return 0
+        if present:
+            raise ValueError(
+                "Partial loan schedule import-ID collision; refusing to append any payments"
+            )
+        if not args.preview:
+            _append_validated_and_commit_locked(
+                args.journal,
+                schedule,
+                f"Add remaining loan schedule: {args.description}",
+            )
+    if args.preview:
+        print(schedule, end="")
+        print("Preview only; nothing was written.", file=sys.stderr)
+    else:
+        print(f"Appended {len(periods)} loan payments to {args.journal}")
+    return 0
+
+
 def _read_active_journal_text(journal: Path) -> str:
     result = _run(["hledger", "-f", str(journal), "files"], capture=True)
     if result.returncode:
@@ -3140,6 +3194,25 @@ def build_parser() -> argparse.ArgumentParser:
     installment_parser.add_argument("--preview", action="store_true", help="Show entries without writing")
     installment_parser.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)
     installment_parser.set_defaults(func=command_installment)
+
+    loan_parser = subparsers.add_parser(
+        "loan-resume", help="Write a remaining reducing-balance loan schedule"
+    )
+    loan_parser.add_argument("--loan-id", required=True)
+    loan_parser.add_argument("--start", required=True)
+    loan_parser.add_argument("--description", required=True)
+    loan_parser.add_argument("--principal", required=True)
+    loan_parser.add_argument("--annual-rate", required=True)
+    loan_parser.add_argument("--payment", required=True)
+    loan_parser.add_argument("--paid-periods", type=int, required=True)
+    loan_parser.add_argument("--remaining-periods", type=int, required=True)
+    loan_parser.add_argument("--currency", required=True)
+    loan_parser.add_argument("--liability", required=True)
+    loan_parser.add_argument("--interest-account", required=True)
+    loan_parser.add_argument("--payment-account", required=True)
+    loan_parser.add_argument("--rounding", required=True)
+    loan_parser.add_argument("--preview", action="store_true", help="Show entries without writing")
+    loan_parser.set_defaults(func=command_loan_resume)
 
     ingest_parser = subparsers.add_parser(
         "ingest-json",

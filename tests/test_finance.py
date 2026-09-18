@@ -2896,6 +2896,173 @@ class ImportTests(unittest.TestCase):
 
 
 class CliWriteBehaviorTests(unittest.TestCase):
+    @staticmethod
+    def loan_resume_args():
+        return [
+            "loan-resume",
+            "--loan-id",
+            "personal-3200000",
+            "--start",
+            "2026-10-08",
+            "--description",
+            "Personal loan payment",
+            "--principal",
+            "1907335",
+            "--annual-rate",
+            "2.1",
+            "--payment",
+            "56229",
+            "--paid-periods",
+            "25",
+            "--remaining-periods",
+            "35",
+            "--currency",
+            "TWD",
+            "--liability",
+            "liabilities:loans:personal",
+            "--interest-account",
+            "expenses:interest:loans",
+            "--payment-account",
+            "assets:bank:checking",
+            "--rounding",
+            "1",
+        ]
+
+    def test_loan_resume_preview_writes_nothing(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            before = journal.read_bytes()
+            head_before = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            result = subprocess.run(
+                base + self.loan_resume_args() + ["--preview"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            head_after = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            after = journal.read_bytes()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.count("; source:scheduled-loan"), 35)
+        self.assertIn("Preview only", result.stderr)
+        self.assertEqual(after, before)
+        self.assertEqual(head_after, head_before)
+
+    def test_loan_resume_writes_one_checked_git_commit(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            result = subprocess.run(
+                base + self.loan_resume_args(),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            text = journal.read_text(encoding="utf-8")
+            check = subprocess.run(
+                ["hledger", "-f", str(journal), "check"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            subjects = subprocess.run(
+                ["git", "-C", tmp, "log", "--format=%s"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(check.returncode, 0, check.stderr)
+        self.assertEqual(text.count("; source:scheduled-loan"), 35)
+        self.assertEqual(
+            subjects.count("Add remaining loan schedule: Personal loan payment"), 1
+        )
+
+    def test_loan_resume_rejects_invalid_cli_values_without_writing(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            before = journal.read_bytes()
+            head = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            cases = (
+                ("--start", "not-a-date", "Invalid isoformat"),
+                ("--principal", "not-a-decimal", "Principal"),
+                ("--remaining-periods", "not-an-integer", "invalid int value"),
+            )
+            results = []
+            for option, bad_value, _message in cases:
+                command = self.loan_resume_args()
+                command[command.index(option) + 1] = bad_value
+                results.append(
+                    subprocess.run(
+                        base + command,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                )
+            head_after = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            after = journal.read_bytes()
+        for result, (_option, _bad_value, message) in zip(results, cases):
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(message, result.stderr)
+        self.assertEqual(after, before)
+        self.assertEqual(head_after, head)
+
+    def test_loan_resume_writes_future_transactions_immediately(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            subprocess.run(
+                base + self.loan_resume_args(),
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            printed = subprocess.run(
+                [
+                    "hledger",
+                    "-f",
+                    str(journal),
+                    "print",
+                    "tag:loan-id=personal-3200000",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        self.assertEqual(printed.count("; source:scheduled-loan"), 35)
+        self.assertIn("2026-10-08 Personal loan payment [26/60]", printed)
+        self.assertIn("2029-08-08 Personal loan payment [60/60]", printed)
+
     def test_audit_command_returns_failure_for_reversed_bulk_expenses(self):
         script = SKILL_DIR / "scripts" / "finance.py"
         with tempfile.TemporaryDirectory() as tmp:
