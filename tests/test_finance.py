@@ -2634,6 +2634,109 @@ class AuditTests(unittest.TestCase):
             {finding["code"] for finding in report["findings"]},
         )
 
+    def test_audit_installment_duplicate_exemption_rejects_virtual_and_asserted_postings(self):
+        for name, mutate in (
+            (
+                "virtual",
+                lambda transaction: transaction["tpostings"][0].__setitem__(
+                    "ptype", "VirtualPosting"
+                ),
+            ),
+            (
+                "balance-assertion",
+                lambda transaction: transaction["tpostings"][0].__setitem__(
+                    "pbalanceassertion", {"amount": "100 TWD"}
+                ),
+            ),
+        ):
+            with self.subTest(name=name):
+                transactions = [
+                    self._transaction(
+                        "expenses:electronics",
+                        100,
+                        tags=[
+                            ["kind", "expense"],
+                            ["source", "structured-csv"],
+                            ["import-id", f"unsafe-{name}"],
+                        ],
+                        description=f"Phone [{index}/2]",
+                    )
+                    for index in range(1, 3)
+                ]
+                transactions[0]["tdate"] = "2024-01-31"
+                transactions[1]["tdate"] = "2024-02-29"
+                mutate(transactions[0])
+                report = audit_journal(transactions, "")
+                self.assertIn(
+                    "duplicate-import-id",
+                    {finding["code"] for finding in report["findings"]},
+                )
+
+    def test_audit_strict_rejects_real_virtual_and_asserted_duplicate_installments(self):
+        cases = {
+            "virtual": (
+                "    expenses:electronics  100 TWD\n"
+                "    assets:cash  -100 TWD\n"
+                "    (assets:virtual)  -1 TWD\n",
+                "    expenses:electronics  100 TWD\n"
+                "    assets:cash  -100 TWD\n"
+                "    (assets:virtual)  -1 TWD\n",
+            ),
+            "balance-assertion": (
+                "    expenses:electronics  100 TWD = 100 TWD\n"
+                "    assets:cash  -100 TWD\n",
+                "    expenses:electronics  100 TWD = 200 TWD\n"
+                "    assets:cash  -100 TWD\n",
+            ),
+        }
+        for name, (first_postings, second_postings) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                journal_text = (
+                    "2024-01-31 Phone [1/2]\n"
+                    "    ; kind:expense\n"
+                    "    ; source:structured-csv\n"
+                    f"    ; import-id:unsafe-{name}\n"
+                    f"{first_postings}\n"
+                    "2024-02-29 Phone [2/2]\n"
+                    "    ; kind:expense\n"
+                    "    ; source:structured-csv\n"
+                    f"    ; import-id:unsafe-{name}\n"
+                    f"{second_postings}"
+                )
+                journal = Path(tmp) / "unsafe-installments.journal"
+                journal.write_text(journal_text, encoding="utf-8")
+                printed = subprocess.run(
+                    ["hledger", "-f", str(journal), "print", "--output-format=json"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                strict_audit = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SKILL_DIR / "scripts" / "finance.py"),
+                        "--journal",
+                        str(journal),
+                        "audit",
+                        "--strict",
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(printed.returncode, 0, printed.stderr)
+                transactions = json.loads(printed.stdout)
+                report = audit_journal(transactions, journal_text)
+                self.assertIn(
+                    "duplicate-import-id",
+                    {finding["code"] for finding in report["findings"]},
+                )
+                self.assertEqual(
+                    strict_audit.returncode,
+                    2,
+                    strict_audit.stderr or strict_audit.stdout,
+                )
+
     def test_audit_strict_rejects_real_hledger_adjustments_disguised_as_installments(self):
         journal_text = (
             "2024-01-31 Legacy correction [1/2]\n"
@@ -3680,6 +3783,12 @@ class CliWriteBehaviorTests(unittest.TestCase):
                     results.append(
                         subprocess.run(base + command, check=False, capture_output=True, text=True)
                     )
+            for value in ("0e-1000000000", "0e1000000000"):
+                command = self.loan_resume_args()
+                command[command.index("--annual-rate") + 1] = value
+                results.append(
+                    subprocess.run(base + command, check=False, capture_output=True, text=True)
+                )
             after = journal.read_bytes()
             head_after = subprocess.run(
                 ["git", "-C", tmp, "rev-parse", "HEAD"],
@@ -3801,6 +3910,82 @@ class CliWriteBehaviorTests(unittest.TestCase):
                     subprocess.run(
                         ["git", "-C", tmp, "rev-parse", "HEAD"], check=True,
                         capture_output=True, text=True,
+                    ).stdout.strip(),
+                    head_before,
+                )
+
+    def test_loan_resume_all_ids_reject_altered_header_fields_and_omitted_amounts(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        mutations = (
+            (
+                "secondary-date",
+                lambda text: text.replace(
+                    "2026-10-08 Personal loan payment",
+                    "2026-10-08=2026-10-09 Personal loan payment",
+                    1,
+                ),
+            ),
+            (
+                "status",
+                lambda text: text.replace(
+                    "2026-10-08 Personal loan payment",
+                    "2026-10-08 * Personal loan payment",
+                    1,
+                ),
+            ),
+            (
+                "code",
+                lambda text: text.replace(
+                    "2026-10-08 Personal loan payment",
+                    "2026-10-08 (changed) Personal loan payment",
+                    1,
+                ),
+            ),
+            (
+                "omitted-principal-amount",
+                lambda text: text.replace("  52891 TWD", "", 1),
+            ),
+            (
+                "omitted-interest-amount",
+                lambda text: text.replace("  3338 TWD", "", 1),
+            ),
+            (
+                "omitted-payment-amount",
+                lambda text: text.replace("  -56229 TWD", "", 1),
+            ),
+        )
+        for name, mutate in mutations:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                journal = Path(tmp) / "main.journal"
+                base = [sys.executable, str(script), "--journal", str(journal)]
+                subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+                subprocess.run(base + self.loan_resume_args(), check=True, capture_output=True, text=True)
+                original = journal.read_text(encoding="utf-8")
+                changed = mutate(original)
+                self.assertNotEqual(changed, original)
+                journal.write_text(changed, encoding="utf-8")
+                subprocess.run(["git", "-C", tmp, "add", "main.journal"], check=True)
+                subprocess.run(["git", "-C", tmp, "commit", "-qm", "tamper fixture"], check=True)
+                before = journal.read_bytes()
+                head_before = subprocess.run(
+                    ["git", "-C", tmp, "rev-parse", "HEAD"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                result = subprocess.run(
+                    base + self.loan_resume_args(), check=False, capture_output=True, text=True
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("terms-mismatch", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(journal.read_bytes(), before)
+                self.assertEqual(
+                    subprocess.run(
+                        ["git", "-C", tmp, "rev-parse", "HEAD"],
+                        check=True,
+                        capture_output=True,
+                        text=True,
                     ).stdout.strip(),
                     head_before,
                 )
@@ -4215,6 +4400,77 @@ class CliWriteBehaviorTests(unittest.TestCase):
         self.assertNotIn("Historical lunch", skipped_text)
         self.assertEqual(unique_result.returncode, 0, unique_result.stderr)
         self.assertIn("Unique historical dinner", written_text)
+
+    def test_audit_rejects_root_and_included_source_mutation_during_hledger_parse(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        transaction = (
+            "2026-01-31 Raced loan [1/1]\n"
+            "    ; source:scheduled-loan\n"
+            "    ; kind:loan-payment\n"
+            "    ; loan-id:raced-loan\n"
+            "    ; loan-period:1\n"
+            "    ; loan-total-periods:1\n"
+            "    ; import-id:loan.raced-loan.period.1\n"
+            "    liabilities:loans:raced  100 TWD\n"
+            "    expenses:interest:loans  0 TWD\n"
+            "    assets:bank:checking  -100 TWD\n"
+        )
+        mutator = (
+            "#!/usr/bin/python3\n"
+            "import os, pathlib, sys\n"
+            "if 'print' in sys.argv:\n"
+            "    target = pathlib.Path(os.environ['MUTATE_TARGET'])\n"
+            "    original = target.read_text(encoding='utf-8')\n"
+            "    changed = original.replace('  -100 TWD', '', 1)\n"
+            "    if os.environ['MUTATE_MODE'] == 'replace':\n"
+            "        replacement = target.with_name(target.name + '.replacement')\n"
+            "        replacement.write_text(changed, encoding='utf-8')\n"
+            "        os.replace(replacement, target)\n"
+            "    else:\n"
+            "        target.write_text(changed, encoding='utf-8')\n"
+            "os.execv('/usr/bin/hledger', ['/usr/bin/hledger', *sys.argv[1:]])\n"
+        )
+        for location in ("root", "included"):
+            for mode in ("replace", "in-place"):
+                with self.subTest(location=location, mode=mode), tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp) / "main.journal"
+                    if location == "root":
+                        root.write_text(transaction, encoding="utf-8")
+                        target = root
+                    else:
+                        target = Path(tmp) / "loans.journal"
+                        target.write_text(transaction, encoding="utf-8")
+                        root.write_text("include loans.journal\n", encoding="utf-8")
+                    bin_dir = Path(tmp) / "bin"
+                    bin_dir.mkdir()
+                    wrapper = bin_dir / "hledger"
+                    wrapper.write_text(mutator, encoding="utf-8")
+                    wrapper.chmod(0o755)
+                    environment = os.environ.copy()
+                    environment.update(
+                        {
+                            "PATH": f"{bin_dir}{os.pathsep}{environment['PATH']}",
+                            "MUTATE_TARGET": str(target),
+                            "MUTATE_MODE": mode,
+                        }
+                    )
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            str(script),
+                            "--journal",
+                            str(root),
+                            "audit",
+                            "--strict",
+                        ],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                    )
+                self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+                self.assertIn("changed", result.stderr.lower())
+                self.assertNotIn("Traceback", result.stderr)
 
     def test_audit_waits_for_the_shared_journal_lock(self):
         script = SKILL_DIR / "scripts" / "finance.py"

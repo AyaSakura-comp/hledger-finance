@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unicodedata
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, DecimalException, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from difflib import SequenceMatcher
@@ -177,7 +178,9 @@ def _validate_loan_decimal(
         raise ValueError(f"{label} must be finite")
     _sign, digits, exponent = value.as_tuple()
     adjusted_exponent = value.adjusted() if value else 0
-    if abs(adjusted_exponent) > MAX_LOAN_ADJUSTED_EXPONENT:
+    if (value.is_zero() and exponent > MAX_LOAN_ADJUSTED_EXPONENT) or abs(
+        adjusted_exponent
+    ) > MAX_LOAN_ADJUSTED_EXPONENT:
         raise ValueError(
             f"{label} exceeds the safe magnitude limit "
             f"(adjusted exponent +/-{MAX_LOAN_ADJUSTED_EXPONENT})"
@@ -1228,7 +1231,12 @@ def _ingest_schema_permits_installments(transaction: dict) -> bool:
 
     commodities: set[str] = set()
     for posting in transaction.get("tpostings", []):
-        if posting.get("pcost") is not None or posting.get("pprice") is not None:
+        if (
+            posting.get("ptype", "RegularPosting") != "RegularPosting"
+            or posting.get("pbalanceassertion") is not None
+            or posting.get("pcost") is not None
+            or posting.get("pprice") is not None
+        ):
             return False
         for amount in posting.get("pamount", []):
             if amount.get("aprice") is not None:
@@ -3120,19 +3128,51 @@ def _parse_decimal_argument(value: str, label: str) -> Decimal:
         raise ValueError(f"{label} must be a decimal") from error
 
 
-def _loan_payment_semantic_tuple(transaction: dict) -> tuple | None:
+def _loan_payment_semantic_tuple(
+    transaction: dict, source_texts: dict[str, str]
+) -> tuple | None:
     metadata = _loan_payment_metadata(transaction)
     structure = _loan_payment_structure(transaction)
     if metadata is None or structure is None:
         return None
     tags = _transaction_tag_values(transaction)
+    tag_signature = tuple(
+        sorted((name, tuple(values)) for name, values in tags.items())
+    )
+    posting_signature = tuple(
+        (
+            str(posting.get("paccount", "")),
+            posting.get("pstatus"),
+            posting.get("pdate"),
+            posting.get("pdate2"),
+            posting.get("pcomment"),
+            tuple(tuple(tag) for tag in posting.get("ptags", [])),
+            tuple(
+                (
+                    amount.get("acommodity"),
+                    _amount_decimal(amount),
+                )
+                for amount in posting.get("pamount", [])
+            ),
+        )
+        for posting in transaction.get("tpostings", [])
+    )
+    block = _source_block_for_transaction(transaction, source_texts)
+    raw_postings_are_exactly_explicit = bool(
+        block and _raw_loan_block_status(block)[0]
+    )
     return (
         metadata["date"],
+        transaction.get("tdate2"),
+        transaction.get("tstatus"),
+        transaction.get("tcode"),
         metadata["base_description"],
         metadata["loan_id"],
         metadata["period"],
         metadata["total"],
-        tags["import-id"][0],
+        tag_signature,
+        posting_signature,
+        raw_postings_are_exactly_explicit,
         *structure["accounts"],
         structure["commodity"],
         structure["principal"],
@@ -3151,13 +3191,42 @@ def _expected_loan_payment_semantic_tuple(
     interest_account: str,
     payment_account: str,
 ) -> tuple:
+    tags = {
+        "source": ("scheduled-loan",),
+        "kind": ("loan-payment",),
+        "loan-id": (loan_id,),
+        "loan-period": (str(period["period"]),),
+        "loan-total-periods": (str(period["total_periods"]),),
+        "import-id": (period["import_id"],),
+    }
+    posting_signature = tuple(
+        (
+            account,
+            "Unmarked",
+            None,
+            None,
+            "",
+            (),
+            ((currency, amount),),
+        )
+        for account, amount in (
+            (liability_account, period["principal"]),
+            (interest_account, period["interest"]),
+            (payment_account, -period["payment"]),
+        )
+    )
     return (
         period["date"],
+        None,
+        "Unmarked",
+        "",
         description,
         loan_id,
         period["period"],
         period["total_periods"],
-        period["import_id"],
+        tuple(sorted(tags.items())),
+        posting_signature,
+        True,
         liability_account,
         interest_account,
         payment_account,
@@ -3220,15 +3289,22 @@ def command_loan_resume(args: argparse.Namespace) -> int:
             for row in periods
         }
         expected_ids = set(expected_semantics)
+        source_snapshots = _snapshot_active_journal_sources(args.journal)
+        source_texts = {
+            filename: snapshot.text for filename, snapshot in source_snapshots.items()
+        }
         transactions_by_id: defaultdict[str, list[dict]] = defaultdict(list)
         for transaction in _load_journal_transactions(args.journal):
             for import_id in _transaction_tag_values(transaction).get("import-id", []):
                 transactions_by_id[import_id].append(transaction)
+        _verify_active_journal_sources(source_snapshots)
         present = expected_ids & set(transactions_by_id)
         if present == expected_ids:
             exact = all(
                 len(transactions_by_id[import_id]) == 1
-                and _loan_payment_semantic_tuple(transactions_by_id[import_id][0])
+                and _loan_payment_semantic_tuple(
+                    transactions_by_id[import_id][0], source_texts
+                )
                 == expected_semantics[import_id]
                 for import_id in expected_ids
             )
@@ -3260,8 +3336,29 @@ def command_loan_resume(args: argparse.Namespace) -> int:
     return 0
 
 
-def _safe_read_active_journal_source(filename: str) -> str:
-    """Read one hledger-reported active source without following a swapped link."""
+@dataclass(frozen=True)
+class _JournalSourceSnapshot:
+    text: str
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+    digest: bytes
+
+
+def _source_stat_signature(source_stat: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        source_stat.st_dev,
+        source_stat.st_ino,
+        source_stat.st_size,
+        source_stat.st_mtime_ns,
+        source_stat.st_ctime_ns,
+    )
+
+
+def _snapshot_active_journal_source(filename: str) -> _JournalSourceSnapshot:
+    """Snapshot one active source and reject mutation during the read."""
     path = Path(filename)
     try:
         inspected = os.lstat(path)
@@ -3287,10 +3384,26 @@ def _safe_read_active_journal_source(filename: str) -> str:
             raise ValueError(f"Journal source {filename} changed to a non-regular file")
         if (opened.st_dev, opened.st_ino) != (inspected.st_dev, inspected.st_ino):
             raise ValueError(f"Journal source {filename} changed while opening")
-        handle = os.fdopen(descriptor, "r", encoding="utf-8")
-        descriptor = None
-        with handle:
-            return handle.read()
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        raw = b"".join(chunks)
+        finished = os.fstat(descriptor)
+        if _source_stat_signature(opened) != _source_stat_signature(finished):
+            raise ValueError(f"Journal source {filename} changed while reading")
+        text = raw.decode("utf-8")
+        return _JournalSourceSnapshot(
+            text=text,
+            device=finished.st_dev,
+            inode=finished.st_ino,
+            size=finished.st_size,
+            mtime_ns=finished.st_mtime_ns,
+            ctime_ns=finished.st_ctime_ns,
+            digest=hashlib.sha256(raw).digest(),
+        )
     except (OSError, UnicodeError) as error:
         raise ValueError(f"Could not read journal source {filename}: {error}") from error
     finally:
@@ -3298,20 +3411,51 @@ def _safe_read_active_journal_source(filename: str) -> str:
             os.close(descriptor)
 
 
-def _read_active_journal_sources(journal: Path) -> dict[str, str]:
+def _snapshot_active_journal_sources(
+    journal: Path,
+) -> dict[str, _JournalSourceSnapshot]:
     result = _run(["hledger", "-f", str(journal), "files"], capture=True)
     if result.returncode:
         raise ValueError(result.stderr.strip() or "Could not list active journal files")
-    source_texts: dict[str, str] = {}
+    snapshots: dict[str, _JournalSourceSnapshot] = {}
     for filename in result.stdout.splitlines():
         if not filename.strip():
             continue
-        if filename in source_texts:
+        if filename in snapshots:
             raise ValueError(f"Ambiguous duplicate active journal source: {filename}")
-        source_texts[filename] = _safe_read_active_journal_source(filename)
-    if not source_texts:
+        snapshots[filename] = _snapshot_active_journal_source(filename)
+    if not snapshots:
         raise ValueError("Could not identify any active journal source files")
-    return source_texts
+    return snapshots
+
+
+def _verify_active_journal_sources(
+    expected: dict[str, _JournalSourceSnapshot],
+) -> None:
+    for filename, original in expected.items():
+        try:
+            current = _snapshot_active_journal_source(filename)
+        except ValueError as error:
+            raise ValueError(
+                f"Journal source {filename} changed during hledger parsing: {error}"
+            ) from error
+        original_identity = (original.device, original.inode)
+        current_identity = (current.device, current.inode)
+        original_metadata = (original.size, original.mtime_ns, original.ctime_ns)
+        current_metadata = (current.size, current.mtime_ns, current.ctime_ns)
+        if (
+            current_identity != original_identity
+            or current_metadata != original_metadata
+            or current.digest != original.digest
+        ):
+            raise ValueError(f"Journal source {filename} changed during hledger parsing")
+
+
+def _read_active_journal_sources(journal: Path) -> dict[str, str]:
+    return {
+        filename: snapshot.text
+        for filename, snapshot in _snapshot_active_journal_sources(journal).items()
+    }
 
 
 def _read_active_journal_text(journal: Path) -> str:
@@ -3426,7 +3570,11 @@ def command_audit(args: argparse.Namespace) -> int:
     _require_regular_journal(args.journal)
     with _acquire_journal_lock(args.journal):
         _require_regular_journal(args.journal)
-        active_sources = _read_active_journal_sources(args.journal)
+        source_snapshots = _snapshot_active_journal_sources(args.journal)
+        active_sources = {
+            filename: snapshot.text
+            for filename, snapshot in source_snapshots.items()
+        }
         active_journal_text = f"\n{_SOURCE_BOUNDARY_SENTINEL}\n".join(
             active_sources.values()
         )
@@ -3436,6 +3584,7 @@ def command_audit(args: argparse.Namespace) -> int:
         )
         if result.returncode:
             raise ValueError(result.stderr.strip() or "Could not read journal for audit")
+        _verify_active_journal_sources(source_snapshots)
         transactions = json.loads(result.stdout)
     report = audit_journal(
         transactions, active_journal_text, source_texts=active_sources
