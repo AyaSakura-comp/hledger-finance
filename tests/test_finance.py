@@ -4761,6 +4761,346 @@ class CliWriteBehaviorTests(unittest.TestCase):
             self.assertEqual(head_after, head_before)
             self.assertNotIn("Traceback", result.stderr)
 
+    def test_writes_bind_source_snapshot_through_validation_and_replacement(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        wrapper_text = (
+            "#!/usr/bin/python3\n"
+            "import os, pathlib, sys\n"
+            "root = pathlib.Path(os.environ['ROOT_JOURNAL'])\n"
+            "added = pathlib.Path(os.environ['ADDED_SOURCE'])\n"
+            "state = pathlib.Path(__file__).with_name('mutated')\n"
+            "mode = os.environ['MUTATE_MODE']\n"
+            "marker = os.environ['WRITE_MARKER']\n"
+            "before = mode.endswith('before-replace') and 'check' in sys.argv\n"
+            "after = mode.endswith('after-replace') and 'files' in sys.argv "
+            "and marker in root.read_text(encoding='utf-8')\n"
+            "if (before or after) and not state.exists():\n"
+            "    state.write_text('yes', encoding='utf-8')\n"
+            "    if mode.startswith('remove-'):\n"
+            "        pathlib.Path(os.environ['REMOVED_SOURCE']).unlink()\n"
+            "    else:\n"
+            "        added.write_text(os.environ['DUPLICATE_TRANSACTION'], encoding='utf-8')\n"
+            "os.execv('/usr/bin/hledger', ['/usr/bin/hledger', *sys.argv[1:]])\n"
+        )
+        duplicate_template = (
+            "2026-01-01 Wildcard collision\n"
+            "    ; import-id:{import_id}\n"
+            "    expenses:test  1 TWD\n"
+            "    assets:cash  -1 TWD\n"
+        )
+        for command_name in ("ingest", "csv", "loan-resume"):
+            for mode in (
+                "add-before-replace",
+                "add-after-replace",
+                "remove-before-replace",
+                "remove-after-replace",
+            ):
+                with self.subTest(command=command_name, mode=mode), tempfile.TemporaryDirectory() as tmp:
+                    book = Path(tmp)
+                    root = book / "main.journal"
+                    base = [sys.executable, str(script), "--journal", str(root)]
+                    subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+                    parts = book / "parts"
+                    parts.mkdir()
+                    (parts / "base.journal").write_text("; stable include\n", encoding="utf-8")
+                    removed_source = parts / "removable.journal"
+                    removed_source.write_text("; removable include\n", encoding="utf-8")
+                    root.write_text(
+                        root.read_text(encoding="utf-8") + "include parts/*.journal\n",
+                        encoding="utf-8",
+                    )
+                    subprocess.run(["git", "-C", tmp, "add", "-A"], check=True)
+                    subprocess.run(["git", "-C", tmp, "commit", "-qm", "wildcard fixture"], check=True)
+                    import_id = (
+                        "loan.personal-3200000.period.26"
+                        if command_name == "loan-resume"
+                        else f"race-{command_name}-1"
+                    )
+                    if command_name == "ingest":
+                        source = book / "batch.json"
+                        source.write_text(
+                            json.dumps(
+                                {
+                                    "transactions": [
+                                        {
+                                            "kind": "expense",
+                                            "date": "2026-01-01",
+                                            "description": "Ingest race marker",
+                                            "amount": "1",
+                                            "currency": "TWD",
+                                            "debit": "expenses:test",
+                                            "credit": "assets:cash",
+                                            "import_id": import_id,
+                                            "tags": ["source:fuzzy-text"],
+                                        }
+                                    ]
+                                }
+                            ),
+                            encoding="utf-8",
+                        )
+                        command = base + ["ingest-json", str(source)]
+                        marker = "Ingest race marker"
+                    elif command_name == "csv":
+                        source = book / "rows.csv"
+                        source.write_text(
+                            f"date,description,amount,id\n2026-01-01,CSV race marker,1,{import_id}\n",
+                            encoding="utf-8",
+                        )
+                        command = base + [
+                            "import-csv",
+                            str(source),
+                            "--id-column",
+                            "id",
+                            "--debit",
+                            "expenses:test",
+                            "--credit",
+                            "assets:cash",
+                        ]
+                        marker = "CSV race marker"
+                    else:
+                        command = base + self.loan_resume_args()
+                        marker = "Personal loan payment"
+                    before = root.read_bytes()
+                    head_before = subprocess.run(
+                        ["git", "-C", tmp, "rev-parse", "HEAD"], check=True,
+                        capture_output=True, text=True,
+                    ).stdout.strip()
+                    index_before = subprocess.run(
+                        ["git", "-C", tmp, "diff", "--cached", "--binary"], check=True,
+                        capture_output=True,
+                    ).stdout
+                    bin_dir = book / "bin"
+                    bin_dir.mkdir()
+                    wrapper = bin_dir / "hledger"
+                    wrapper.write_text(wrapper_text, encoding="utf-8")
+                    wrapper.chmod(0o755)
+                    environment = os.environ.copy()
+                    environment.update(
+                        {
+                            "PATH": f"{bin_dir}{os.pathsep}{environment['PATH']}",
+                            "ROOT_JOURNAL": str(root),
+                            "ADDED_SOURCE": str(parts / "raced.journal"),
+                            "REMOVED_SOURCE": str(removed_source),
+                            "MUTATE_MODE": mode,
+                            "WRITE_MARKER": marker,
+                            "DUPLICATE_TRANSACTION": duplicate_template.format(import_id=import_id),
+                        }
+                    )
+                    result = subprocess.run(
+                        command, check=False, capture_output=True, text=True, env=environment
+                    )
+                    head_after = subprocess.run(
+                        ["git", "-C", tmp, "rev-parse", "HEAD"], check=True,
+                        capture_output=True, text=True,
+                    ).stdout.strip()
+                    index_after = subprocess.run(
+                        ["git", "-C", tmp, "diff", "--cached", "--binary"], check=True,
+                        capture_output=True,
+                    ).stdout
+                    after = root.read_bytes()
+                self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+                self.assertIn("source set changed", result.stderr.lower())
+                self.assertEqual(after, before)
+                self.assertEqual(head_after, head_before)
+                self.assertEqual(index_after, index_before)
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_audit_rejects_transient_wildcard_source_returned_by_print(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        wrapper_text = (
+            "#!/usr/bin/python3\n"
+            "import os, pathlib, subprocess, sys\n"
+            "if 'print' in sys.argv:\n"
+            "    ghost = pathlib.Path(os.environ['GHOST_SOURCE'])\n"
+            "    ghost.write_text(os.environ['GHOST_TRANSACTION'], encoding='utf-8')\n"
+            "    result = subprocess.run(['/usr/bin/hledger', *sys.argv[1:]], "
+            "capture_output=True, text=True)\n"
+            "    ghost.unlink()\n"
+            "    sys.stdout.write(result.stdout)\n"
+            "    sys.stderr.write(result.stderr)\n"
+            "    raise SystemExit(result.returncode)\n"
+            "os.execv('/usr/bin/hledger', ['/usr/bin/hledger', *sys.argv[1:]])\n"
+        )
+        ghost_transaction = (
+            "2026-01-01 Transient ghost\n"
+            "    ; source:fuzzy-text\n"
+            "    ; kind:expense\n"
+            "    ; import-id:transient-ghost-1\n"
+            "    expenses:test  1 TWD\n"
+            "    assets:cash  -1 TWD\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "main.journal"
+            parts = Path(tmp) / "parts"
+            parts.mkdir()
+            (parts / "base.journal").write_text("; stable\n", encoding="utf-8")
+            root.write_text("include parts/*.journal\n", encoding="utf-8")
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            wrapper = bin_dir / "hledger"
+            wrapper.write_text(wrapper_text, encoding="utf-8")
+            wrapper.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "PATH": f"{bin_dir}{os.pathsep}{environment['PATH']}",
+                    "GHOST_SOURCE": str(parts / "ghost.journal"),
+                    "GHOST_TRANSACTION": ghost_transaction,
+                }
+            )
+            result = subprocess.run(
+                [sys.executable, str(script), "--journal", str(root), "audit", "--strict"],
+                check=False, capture_output=True, text=True, env=environment,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+        self.assertIn("source", (result.stderr + result.stdout).lower())
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_strict_audit_canonicalizes_dotdot_root_and_relative_include_sources(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        loan = (
+            "2026-01-31 Alias loan [1/1]\n"
+            "    ; source:scheduled-loan\n"
+            "    ; kind:loan-payment\n"
+            "    ; loan-id:alias-loan\n"
+            "    ; loan-period:1\n"
+            "    ; loan-total-periods:1\n"
+            "    ; import-id:loan.alias-loan.period.1\n"
+            "    liabilities:loans:alias  100 TWD\n"
+            "    expenses:interest:loans  0 TWD\n"
+            "    assets:bank:checking  -100 TWD\n"
+        )
+        for location in ("root", "relative-include"):
+            with self.subTest(location=location), tempfile.TemporaryDirectory() as tmp:
+                workspace = Path(tmp)
+                book = workspace / "book"
+                book.mkdir()
+                root = book / "main.journal"
+                if location == "root":
+                    root.write_text(loan, encoding="utf-8")
+                else:
+                    parts = workspace / "parts"
+                    parts.mkdir()
+                    (parts / "loan.journal").write_text(loan, encoding="utf-8")
+                    root.write_text("include ../parts/loan.journal\n", encoding="utf-8")
+                alias = book / "subdir" / ".." / "main.journal"
+                (book / "subdir").mkdir()
+                result = subprocess.run(
+                    [sys.executable, str(script), "--journal", str(alias), "audit", "--strict"],
+                    check=False, capture_output=True, text=True,
+                )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["critical_count"], 0)
+            self.assertEqual(report["transaction_count"], 1)
+
+    def test_high_precision_loan_rerun_uses_raw_literals_not_hledger_float(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        wrapper_text = (
+            "#!/usr/bin/python3\n"
+            "import json, os, subprocess, sys\n"
+            "if 'print' in sys.argv and '--output-format=json' in sys.argv:\n"
+            "    result = subprocess.run(['/usr/bin/hledger', *sys.argv[1:]], "
+            "capture_output=True, text=True)\n"
+            "    payload = json.loads(result.stdout)\n"
+            "    for transaction in payload:\n"
+            "        for posting in transaction.get('tpostings', []):\n"
+            "            for amount in posting.get('pamount', []):\n"
+            "                amount['aquantity'] = {'floatingPoint': 0.1}\n"
+            "    sys.stdout.write(json.dumps(payload))\n"
+            "    sys.stderr.write(result.stderr)\n"
+            "    raise SystemExit(result.returncode)\n"
+            "os.execv('/usr/bin/hledger', ['/usr/bin/hledger', *sys.argv[1:]])\n"
+        )
+        high_precision_args = [
+            "loan-resume", "--loan-id", "exact-38", "--start", "2026-10-08",
+            "--description", "Exact high precision loan",
+            "--principal", "9999999999999999999.999999999999999999",
+            "--annual-rate", "0",
+            "--payment", "3333333333333333333.333333333333333333",
+            "--paid-periods", "0", "--remaining-periods", "3", "--currency", "XAU",
+            "--liability", "liabilities:loans:exact",
+            "--interest-account", "expenses:interest:exact",
+            "--payment-account", "assets:exact", "--rounding", "0.000000000000000001",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(root)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            first = subprocess.run(
+                base + high_precision_args, check=False, capture_output=True, text=True
+            )
+            first_bytes = root.read_bytes()
+            first_head = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"], check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            wrapper = bin_dir / "hledger"
+            wrapper.write_text(wrapper_text, encoding="utf-8")
+            wrapper.chmod(0o755)
+            environment = os.environ.copy()
+            environment["PATH"] = f"{bin_dir}{os.pathsep}{environment['PATH']}"
+            rerun = subprocess.run(
+                base + high_precision_args, check=False, capture_output=True, text=True,
+                env=environment,
+            )
+            rerun_bytes = root.read_bytes()
+            rerun_head = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"], check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            literal_38 = root.read_text(encoding="utf-8").replace(
+                "3333333333333333333.333333333333333333 XAU",
+                "3333333333333333333.3333333333333333330 XAU",
+            )
+            root.write_text(literal_38, encoding="utf-8")
+            subprocess.run(["git", "-C", tmp, "add", "main.journal"], check=True)
+            subprocess.run(["git", "-C", tmp, "commit", "-qm", "38 digit literals"], check=True)
+            literal_38_bytes = root.read_bytes()
+            literal_38_head = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"], check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            rerun_38 = subprocess.run(
+                base + high_precision_args, check=False, capture_output=True, text=True,
+                env=environment,
+            )
+            rerun_38_bytes = root.read_bytes()
+            rerun_38_head = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"], check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            tampered = root.read_text(encoding="utf-8").replace(
+                "3333333333333333333.3333333333333333330 XAU",
+                "3333333333333333333.3333333333333333329 XAU",
+                1,
+            ).replace(
+                "-3333333333333333333.3333333333333333330 XAU",
+                "-3333333333333333333.3333333333333333329 XAU",
+                1,
+            )
+            root.write_text(tampered, encoding="utf-8")
+            subprocess.run(["git", "-C", tmp, "add", "main.journal"], check=True)
+            subprocess.run(["git", "-C", tmp, "commit", "-qm", "tamper exact term"], check=True)
+            mismatch = subprocess.run(
+                base + high_precision_args, check=False, capture_output=True, text=True,
+                env=environment,
+            )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(rerun.returncode, 0, rerun.stderr)
+        self.assertIn("already present", rerun.stderr)
+        self.assertEqual(rerun_bytes, first_bytes)
+        self.assertEqual(rerun_head, first_head)
+        self.assertEqual(rerun_38.returncode, 0, rerun_38.stderr)
+        self.assertIn("already present", rerun_38.stderr)
+        self.assertEqual(rerun_38_bytes, literal_38_bytes)
+        self.assertEqual(rerun_38_head, literal_38_head)
+        self.assertEqual(mismatch.returncode, 2, mismatch.stderr)
+        self.assertIn("terms-mismatch", mismatch.stderr)
+        self.assertNotIn("Traceback", rerun.stderr + mismatch.stderr)
+
     def test_audit_waits_for_the_shared_journal_lock(self):
         script = SKILL_DIR / "scripts" / "finance.py"
         with tempfile.TemporaryDirectory() as tmp:

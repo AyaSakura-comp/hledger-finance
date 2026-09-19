@@ -1356,6 +1356,11 @@ _TRANSACTION_HEADER = re.compile(
 _EXPLICIT_POSTING_AMOUNT = re.compile(
     r".+?(?:\t| {2,})[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:\s+\S.*)?$"
 )
+_RAW_EXPLICIT_POSTING = re.compile(
+    r"(?P<account>.+?)(?:\t| {2,})"
+    r"(?P<amount>[+-]?(?:\d+(?:\.\d*)?|\.\d+))"
+    r"\s+(?P<commodity>[A-Za-z][A-Za-z0-9._-]*)\s*$"
+)
 
 
 def _raw_transaction_blocks(journal_text: str) -> list[list[str]]:
@@ -1440,20 +1445,27 @@ def _raw_loan_block_status(block: Sequence[str]) -> tuple[bool, set[str]]:
     return valid, import_ids
 
 
+def _canonical_transaction_source(transaction: dict) -> str | None:
+    positions = transaction.get("tsourcepos") or []
+    if len(positions) != 2 or not all(isinstance(item, dict) for item in positions):
+        return None
+    start_name = positions[0].get("sourceName")
+    end_name = positions[1].get("sourceName")
+    if not isinstance(start_name, str) or not isinstance(end_name, str):
+        return None
+    canonical_start = _canonical_journal_source(start_name)
+    canonical_end = _canonical_journal_source(end_name)
+    return canonical_start if canonical_start == canonical_end else None
+
+
 def _source_block_for_transaction(
     transaction: dict, source_texts: dict[str, str]
 ) -> list[str] | None:
     positions = transaction.get("tsourcepos") or []
-    if len(positions) != 2 or not all(isinstance(item, dict) for item in positions):
+    source_name = _canonical_transaction_source(transaction)
+    if source_name is None or source_name not in source_texts:
         return None
     start_position, end_position = positions
-    source_name = start_position.get("sourceName")
-    if (
-        not isinstance(source_name, str)
-        or end_position.get("sourceName") != source_name
-        or source_name not in source_texts
-    ):
-        return None
     start = start_position.get("sourceLine")
     end = end_position.get("sourceLine")
     lines = source_texts[source_name].splitlines()
@@ -1466,6 +1478,35 @@ def _source_block_for_transaction(
     ):
         return None
     return lines[start - 1 : end - 1]
+
+
+def _raw_loan_postings(block: Sequence[str]) -> tuple[tuple[str, Decimal, str], ...] | None:
+    """Parse exact plain posting literals without consulting hledger JSON amounts."""
+    valid, _import_ids = _raw_loan_block_status(block)
+    if not valid:
+        return None
+    posting_lines = [
+        line.lstrip().split(";", 1)[0].rstrip()
+        for line in block[1:]
+        if line.strip() and not line.strip().startswith(";")
+    ]
+    parsed: list[tuple[str, Decimal, str]] = []
+    try:
+        with localcontext(LOAN_ARITHMETIC_CONTEXT):
+            for line in posting_lines:
+                match = _RAW_EXPLICIT_POSTING.fullmatch(line)
+                if match is None:
+                    return None
+                parsed.append(
+                    (
+                        match.group("account").rstrip(),
+                        Decimal(match.group("amount")),
+                        match.group("commodity"),
+                    )
+                )
+    except DecimalException:
+        return None
+    return tuple(parsed) if len(parsed) == 3 else None
 
 
 def _scheduled_loan_raw_amounts_are_explicit(
@@ -1522,8 +1563,13 @@ def audit_journal(
     scheduled_loan_groups: defaultdict[str, list[dict]] = defaultdict(list)
     import_id_transactions: defaultdict[str, list[dict]] = defaultdict(list)
     descriptions: defaultdict[str, int] = defaultdict(int)
+    transaction_sources_outside_snapshot = 0
 
     for transaction in transactions:
+        if source_texts is not None:
+            source_name = _canonical_transaction_source(transaction)
+            if source_name is None or source_name not in source_texts:
+                transaction_sources_outside_snapshot += 1
         description = str(transaction.get("tdescription", "")).strip()
         if description:
             descriptions[description] += 1
@@ -1617,6 +1663,15 @@ def audit_journal(
                     direction[family]["zero_count"] += 1
 
     findings: list[dict] = []
+    if transaction_sources_outside_snapshot:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "transaction-source-outside-snapshot",
+                "count": transaction_sources_outside_snapshot,
+                "message": "Parsed transactions must belong to the snapshotted canonical journal source set.",
+            }
+        )
     date_only_rules = _date_only_automated_rule_lines(journal_text)
     if date_only_rules:
         findings.append(
@@ -3020,17 +3075,40 @@ def _git_commit(book_dir: Path, message: str, paths: Sequence[Path] | None = Non
         subprocess.run(["git", "-C", str(book_dir), "commit", "-m", message], check=True)
 
 
-def _replace_validated_and_commit_locked(journal: Path, replacement: str, message: str) -> None:
+def _replace_validated_and_commit_locked(
+    journal: Path,
+    replacement: str,
+    message: str,
+    *,
+    source_snapshots: dict[str, _JournalSourceSnapshot] | None = None,
+) -> None:
     _require_regular_journal(journal)
     _reject_staged_changes(journal.parent)
     _reject_dirty_journal(journal)
     existing = journal.read_text(encoding="utf-8")
-    _validate_journal_text(replacement, base_dir=journal.parent)
-    _atomic_replace_text(journal, replacement)
+    replaced = False
     try:
+        _validate_journal_text(replacement, base_dir=journal.parent)
+        if source_snapshots is not None:
+            # Validation can execute includes. Rebind the complete set and every
+            # identity/digest at the last possible point before replacement.
+            _verify_active_journal_sources(journal, source_snapshots)
+        _atomic_replace_text(journal, replacement)
+        replaced = True
+        if source_snapshots is not None:
+            canonical_root = _canonical_journal_source(journal)
+            written_root = _snapshot_active_journal_source(canonical_root)
+            if written_root.text != replacement:
+                raise ValueError("Journal root changed immediately after atomic replacement")
+            written_snapshots = dict(source_snapshots)
+            written_snapshots[canonical_root] = written_root
+            # Re-enumerate after replacement so wildcard additions/removals and
+            # included-file races cannot reach Git commit.
+            _verify_active_journal_sources(journal, written_snapshots)
         _git_commit(journal.parent, message, paths=[journal])
     except Exception:
-        _atomic_replace_text(journal, existing)
+        if replaced:
+            _atomic_replace_text(journal, existing)
         if (journal.parent / ".git").exists():
             relative = str(journal.relative_to(journal.parent))
             subprocess.run(
@@ -3041,10 +3119,18 @@ def _replace_validated_and_commit_locked(journal: Path, replacement: str, messag
         raise
 
 
-def _append_validated_and_commit_locked(journal: Path, addition: str, message: str) -> None:
+def _append_validated_and_commit_locked(
+    journal: Path,
+    addition: str,
+    message: str,
+    *,
+    source_snapshots: dict[str, _JournalSourceSnapshot] | None = None,
+) -> None:
     existing = journal.read_text(encoding="utf-8")
     candidate = _combined_journal_text(existing, addition)
-    _replace_validated_and_commit_locked(journal, candidate, message)
+    _replace_validated_and_commit_locked(
+        journal, candidate, message, source_snapshots=source_snapshots
+    )
 
 
 def _append_validated_and_commit(journal: Path, addition: str, message: str) -> None:
@@ -3158,8 +3244,21 @@ def _loan_payment_semantic_tuple(
     transaction: dict, source_texts: dict[str, str]
 ) -> tuple | None:
     metadata = _loan_payment_metadata(transaction)
-    structure = _loan_payment_structure(transaction)
-    if metadata is None or structure is None:
+    block = _source_block_for_transaction(transaction, source_texts)
+    raw_postings = _raw_loan_postings(block) if block else None
+    postings = transaction.get("tpostings", [])
+    if metadata is None or raw_postings is None or len(postings) != 3:
+        return None
+    if any(
+        posting.get("ptype") != "RegularPosting"
+        or posting.get("pbalanceassertion") is not None
+        or posting.get("pcost") is not None
+        or posting.get("pprice") is not None
+        or len(posting.get("pamount", [])) != 1
+        or posting["pamount"][0].get("aprice") is not None
+        or str(posting.get("paccount", "")) != raw_posting[0]
+        for posting, raw_posting in zip(postings, raw_postings)
+    ):
         return None
     tags = _transaction_tag_values(transaction)
     tag_signature = tuple(
@@ -3173,19 +3272,8 @@ def _loan_payment_semantic_tuple(
             posting.get("pdate2"),
             posting.get("pcomment"),
             tuple(tuple(tag) for tag in posting.get("ptags", [])),
-            tuple(
-                (
-                    amount.get("acommodity"),
-                    _amount_decimal(amount),
-                )
-                for amount in posting.get("pamount", [])
-            ),
         )
-        for posting in transaction.get("tpostings", [])
-    )
-    block = _source_block_for_transaction(transaction, source_texts)
-    raw_postings_are_exactly_explicit = bool(
-        block and _raw_loan_block_status(block)[0]
+        for posting in postings
     )
     return (
         metadata["date"],
@@ -3198,12 +3286,7 @@ def _loan_payment_semantic_tuple(
         metadata["total"],
         tag_signature,
         posting_signature,
-        raw_postings_are_exactly_explicit,
-        *structure["accounts"],
-        structure["commodity"],
-        structure["principal"],
-        structure["interest"],
-        structure["payment"],
+        raw_postings,
     )
 
 
@@ -3225,21 +3308,14 @@ def _expected_loan_payment_semantic_tuple(
         "loan-total-periods": (str(period["total_periods"]),),
         "import-id": (period["import_id"],),
     }
+    expected_postings = (
+        (liability_account, period["principal"], currency),
+        (interest_account, period["interest"], currency),
+        (payment_account, period["payment"].copy_negate(), currency),
+    )
     posting_signature = tuple(
-        (
-            account,
-            "Unmarked",
-            None,
-            None,
-            "",
-            (),
-            ((currency, amount),),
-        )
-        for account, amount in (
-            (liability_account, period["principal"]),
-            (interest_account, period["interest"]),
-            (payment_account, -period["payment"]),
-        )
+        (account, "Unmarked", None, None, "", ())
+        for account, _amount, _commodity in expected_postings
     )
     return (
         period["date"],
@@ -3252,14 +3328,7 @@ def _expected_loan_payment_semantic_tuple(
         period["total_periods"],
         tuple(sorted(tags.items())),
         posting_signature,
-        True,
-        liability_account,
-        interest_account,
-        payment_account,
-        currency,
-        period["principal"],
-        period["interest"],
-        period["payment"],
+        expected_postings,
     )
 
 
@@ -3354,6 +3423,7 @@ def command_loan_resume(args: argparse.Namespace) -> int:
                 args.journal,
                 schedule,
                 f"Add remaining loan schedule: {args.description}",
+                source_snapshots=source_snapshots,
             )
     if args.preview:
         print(schedule, end="")
@@ -3439,8 +3509,8 @@ def _snapshot_active_journal_source(filename: str) -> _JournalSourceSnapshot:
 
 
 def _canonical_journal_source(filename: str | os.PathLike[str]) -> str:
-    """Canonicalize a source name without following a potentially raced symlink."""
-    return os.path.abspath(os.path.normpath(os.fspath(filename)))
+    """Use one canonical spelling for hledger files and tsourcepos names."""
+    return str(Path(filename).resolve(strict=False))
 
 
 def _enumerate_active_journal_sources(journal: Path) -> tuple[str, ...]:
@@ -3525,6 +3595,26 @@ def _verify_active_journal_sources(
         if not _journal_source_matches(original, current):
             raise ValueError(f"Journal source {filename} changed during hledger parsing")
 
+    # Close mutations that occur after the first files listing: enumerate again,
+    # then repeat identity and digest checks before returning to the caller.
+    try:
+        settled_filenames = _enumerate_active_journal_sources(journal)
+    except ValueError as error:
+        raise ValueError(
+            f"Journal active source set changed during hledger parsing: {error}"
+        ) from error
+    if set(settled_filenames) != expected_set:
+        raise ValueError("Journal active source set changed during hledger parsing")
+    for filename, original in expected.items():
+        try:
+            settled = _snapshot_active_journal_source(filename)
+        except ValueError as error:
+            raise ValueError(
+                f"Journal source {filename} changed during hledger parsing: {error}"
+            ) from error
+        if not _journal_source_matches(original, settled):
+            raise ValueError(f"Journal source {filename} changed during hledger parsing")
+
 
 def _read_active_journal_sources(journal: Path) -> dict[str, str]:
     snapshots = _snapshot_active_journal_sources(journal)
@@ -3567,6 +3657,7 @@ def command_ingest_json(args: argparse.Namespace) -> int:
                 args.journal,
                 journal_text,
                 f"Ingest {imported} normalized transactions",
+                source_snapshots=source_snapshots,
             )
     for decision in decisions:
         print(
@@ -3621,6 +3712,7 @@ def command_import_csv(args: argparse.Namespace) -> int:
                 args.journal,
                 journal_text,
                 f"Import {imported} CSV transactions",
+                source_snapshots=source_snapshots,
             )
     print(f"Rows ready: {imported}; duplicates skipped: {skipped}", file=sys.stderr)
     if not journal_text:
