@@ -1,6 +1,6 @@
 ---
 name: hledger-finance
-description: Manage personal finances with hledger from fuzzy natural language, pasted or malformed tables, receipt/invoice images, and validated CLI workflows. Automatically normalize and categorize transactions, batch ingest, handle installments and CSV, query, report, visualize, undo through Git, and optionally back up to Google Drive. Use when the user asks to record, import, scan, extract, split, categorize, inspect, reconcile, report, visualize, budget, forecast, or analyze money.
+description: Manage personal finances with hledger from fuzzy natural language, including short completed-transaction phrases in the form「項目＋金額＋元」such as「晚餐 120 元」or「全聯 680 元」, as well as tables, CSV, and receipt images. Use when the user states a real expense or income with an amount, or asks to record, import, categorize, inspect, reconcile, report, visualize, budget, forecast, undo, or analyze personal money; do not treat price questions or hypothetical amounts as transactions.
 compatibility: Requires hledger, Python 3, git, matplotlib, Pillow, a CJK font, and optionally rclone for Google Drive backup.
 ---
 
@@ -29,6 +29,20 @@ Override journal: `hfin --journal /path/book.journal ...`
 11. For existing-data migration, never copy source signs into hledger postings or generate raw journal text. Determine semantic direction first, normalize positive magnitudes through `ingest-json`, require stable row IDs, and follow [references/HISTORICAL_IMPORT.md](references/HISTORICAL_IMPORT.md).
 12. A successful `hledger check` proves balancing and syntax only. After every historical import, require `hfin audit --strict` plus source control-total reconciliation by kind and currency before declaring success.
 13. For `loan-resume`, never guess the current principal, annual rate, fixed payment, paid or remaining periods, start date, currency, account roles, or rounding quantum. Use `--preview` while source terms are uncertain.
+
+## Trigger recognition
+
+Load and use this skill when the user states a completed personal-finance event using a short amount-bearing phrase, even when they do not explicitly say「記帳」. The common trigger shape is「項目＋金額＋元」, for example:
+
+- `晚餐 120 元`
+- `全聯 680 元`
+- `搭計程車 350 元`
+- `收到薪水 50000 元`
+- `昨天咖啡花了 95 元`
+
+Treat affirmative past or present transaction statements as write requests and follow the normal validated fuzzy-ingestion workflow. For this short fuzzy trigger, **always normalize to the JSON schema and call `hfin ingest-json`; do not call `hfin add`**, because `ingest-json` applies configured currency payment routing and records omitted facts with the required `inferred:*` tags. Infer only the safe defaults allowed by the safety contract and record immediately when the amount and direction are unambiguous.
+
+Do **not** record interrogative, hypothetical, quoted, or comparison-only text such as `iPhone 多少元？`, `如果晚餐 120 元`, `預算 5000 元可以嗎`, or an example being discussed rather than spent/received. Ask one focused question only when transaction intent or direction is genuinely ambiguous.
 
 ## Initialize
 
