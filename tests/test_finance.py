@@ -10,7 +10,7 @@ import time
 import unittest
 import warnings
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from pathlib import Path
 from unittest import mock
 
@@ -236,6 +236,63 @@ class LoanResumeScheduleTests(unittest.TestCase):
             "payment_account": "assets:bank:checking",
             "rounding_quantum": Decimal("1"),
         }
+
+    def test_reviewer_high_precision_fixture_preserves_every_principal_digit(self):
+        principal = Decimal("9999999999999999999.999999999999999999")
+        regular_principal = Decimal("3333333333333333333.333333333333333333")
+        _journal, periods = build_loan_resume_schedule(
+            **{
+                **self._valid_kwargs(),
+                "principal": principal,
+                "annual_rate": Decimal("0"),
+                "payment": regular_principal,
+                "remaining_periods": 3,
+                "rounding_quantum": Decimal("1e-18"),
+            }
+        )
+
+        self.assertEqual(
+            [period["principal"] for period in periods],
+            [regular_principal, regular_principal, regular_principal],
+        )
+        with localcontext() as context:
+            context.prec = 100
+            self.assertEqual(
+                sum((period["principal"] for period in periods), Decimal("0")),
+                principal,
+            )
+        self.assertEqual(periods[-1]["closing_principal"], Decimal("0"))
+
+    def test_high_precision_rate_and_quantum_do_not_use_ambient_context(self):
+        principal = Decimal("9999999999999999999.999999999999999999")
+        with localcontext() as context:
+            context.prec = 6
+            _journal, periods = build_loan_resume_schedule(
+                **{
+                    **self._valid_kwargs(),
+                    "principal": principal,
+                    "annual_rate": Decimal("1"),
+                    "payment": Decimal("6000000000000000000"),
+                    "remaining_periods": 2,
+                    "rounding_quantum": Decimal("1e-18"),
+                }
+            )
+
+        self.assertEqual(
+            periods[0]["interest"],
+            Decimal("8333333333333333.333333333333333333"),
+        )
+        self.assertEqual(
+            periods[0]["principal"],
+            Decimal("5991666666666666666.666666666666666667"),
+        )
+        with localcontext() as context:
+            context.prec = 100
+            self.assertEqual(
+                sum((period["principal"] for period in periods), Decimal("0")),
+                principal,
+            )
+        self.assertEqual(periods[-1]["closing_principal"], Decimal("0"))
 
     def test_rejects_invalid_decimal_inputs(self):
         cases = (
@@ -4471,6 +4528,238 @@ class CliWriteBehaviorTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
                 self.assertIn("changed", result.stderr.lower())
                 self.assertNotIn("Traceback", result.stderr)
+
+    def test_strict_audit_rejects_source_added_after_initial_enumeration(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        wrapper_text = (
+            "#!/usr/bin/python3\n"
+            "import pathlib, subprocess, sys\n"
+            "state = pathlib.Path(__file__).with_name('enumerated')\n"
+            "if 'files' in sys.argv and not state.exists():\n"
+            "    result = subprocess.run(['/usr/bin/hledger', *sys.argv[1:]], "
+            "capture_output=True, text=True)\n"
+            "    state.write_text('yes', encoding='utf-8')\n"
+            "    target = pathlib.Path(__file__).parents[1] / 'parts' / 'added.journal'\n"
+            "    target.write_text('; added after enumeration\\n', encoding='utf-8')\n"
+            "    sys.stdout.write(result.stdout)\n"
+            "    sys.stderr.write(result.stderr)\n"
+            "    raise SystemExit(result.returncode)\n"
+            "os_exec = __import__('os').execv\n"
+            "os_exec('/usr/bin/hledger', ['/usr/bin/hledger', *sys.argv[1:]])\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "main.journal"
+            parts = Path(tmp) / "parts"
+            parts.mkdir()
+            (parts / "base.journal").write_text("; stable include\n", encoding="utf-8")
+            root.write_text("include parts/*.journal\n", encoding="utf-8")
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            wrapper = bin_dir / "hledger"
+            wrapper.write_text(wrapper_text, encoding="utf-8")
+            wrapper.chmod(0o755)
+            environment = os.environ.copy()
+            environment["PATH"] = f"{bin_dir}{os.pathsep}{environment['PATH']}"
+            result = subprocess.run(
+                [sys.executable, str(script), "--journal", str(root), "audit", "--strict"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+        self.assertIn("source set changed", result.stderr.lower())
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_audit_rejects_root_change_during_initial_source_enumeration(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        wrapper_text = (
+            "#!/usr/bin/python3\n"
+            "import os, pathlib, subprocess, sys\n"
+            "state = pathlib.Path(__file__).with_name('enumerated')\n"
+            "if 'files' in sys.argv and not state.exists():\n"
+            "    result = subprocess.run(['/usr/bin/hledger', *sys.argv[1:]], "
+            "capture_output=True, text=True)\n"
+            "    state.write_text('yes', encoding='utf-8')\n"
+            "    root = pathlib.Path(os.environ['ROOT_JOURNAL'])\n"
+            "    root.write_text(root.read_text(encoding='utf-8') + '; raced root\\n', "
+            "encoding='utf-8')\n"
+            "    sys.stdout.write(result.stdout)\n"
+            "    sys.stderr.write(result.stderr)\n"
+            "    raise SystemExit(result.returncode)\n"
+            "os.execv('/usr/bin/hledger', ['/usr/bin/hledger', *sys.argv[1:]])\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "main.journal"
+            root.write_text("; stable root\n", encoding="utf-8")
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            wrapper = bin_dir / "hledger"
+            wrapper.write_text(wrapper_text, encoding="utf-8")
+            wrapper.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "PATH": f"{bin_dir}{os.pathsep}{environment['PATH']}",
+                    "ROOT_JOURNAL": str(root),
+                }
+            )
+            result = subprocess.run(
+                [sys.executable, str(script), "--journal", str(root), "audit", "--strict"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+        self.assertIn("root journal changed", result.stderr.lower())
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_audit_rejects_added_removed_and_renamed_sources_after_parse(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        wrapper_text = (
+            "#!/usr/bin/python3\n"
+            "import os, pathlib, subprocess, sys\n"
+            "state = pathlib.Path(__file__).with_name('parsed')\n"
+            "if 'print' in sys.argv and not state.exists():\n"
+            "    result = subprocess.run(['/usr/bin/hledger', *sys.argv[1:]], "
+            "capture_output=True, text=True)\n"
+            "    state.write_text('yes', encoding='utf-8')\n"
+            "    parts = pathlib.Path(os.environ['PARTS'])\n"
+            "    mode = os.environ['MUTATE_MODE']\n"
+            "    if mode == 'add':\n"
+            "        (parts / 'added.journal').write_text('; added\\n', encoding='utf-8')\n"
+            "    elif mode == 'remove':\n"
+            "        (parts / 'target.journal').unlink()\n"
+            "    else:\n"
+            "        (parts / 'target.journal').rename(parts / 'renamed.journal')\n"
+            "    sys.stdout.write(result.stdout)\n"
+            "    sys.stderr.write(result.stderr)\n"
+            "    raise SystemExit(result.returncode)\n"
+            "os.execv('/usr/bin/hledger', ['/usr/bin/hledger', *sys.argv[1:]])\n"
+        )
+        for mode in ("add", "remove", "rename"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "main.journal"
+                parts = Path(tmp) / "parts"
+                parts.mkdir()
+                (parts / "base.journal").write_text("; stable\n", encoding="utf-8")
+                if mode != "add":
+                    (parts / "target.journal").write_text("; target\n", encoding="utf-8")
+                root.write_text("include parts/*.journal\n", encoding="utf-8")
+                bin_dir = Path(tmp) / "bin"
+                bin_dir.mkdir()
+                wrapper = bin_dir / "hledger"
+                wrapper.write_text(wrapper_text, encoding="utf-8")
+                wrapper.chmod(0o755)
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "PATH": f"{bin_dir}{os.pathsep}{environment['PATH']}",
+                        "PARTS": str(parts),
+                        "MUTATE_MODE": mode,
+                    }
+                )
+                result = subprocess.run(
+                    [sys.executable, str(script), "--journal", str(root), "audit", "--strict"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+            self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+            self.assertIn("source set changed", result.stderr.lower())
+            self.assertNotIn("Traceback", result.stderr)
+
+    def test_ingest_and_loan_resume_reject_source_addition_before_parse(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        wrapper_text = (
+            "#!/usr/bin/python3\n"
+            "import os, pathlib, sys\n"
+            "state = pathlib.Path(__file__).with_name('mutated')\n"
+            "if 'print' in sys.argv and not state.exists():\n"
+            "    state.write_text('yes', encoding='utf-8')\n"
+            "    pathlib.Path(os.environ['ADDED_SOURCE']).write_text('; raced include\\n', "
+            "encoding='utf-8')\n"
+            "os.execv('/usr/bin/hledger', ['/usr/bin/hledger', *sys.argv[1:]])\n"
+        )
+        for command_name in ("ingest", "loan-resume"):
+            with self.subTest(command=command_name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "main.journal"
+                base = [sys.executable, str(script), "--journal", str(root)]
+                subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+                parts = Path(tmp) / "parts"
+                parts.mkdir()
+                (parts / "base.journal").write_text("; stable include\n", encoding="utf-8")
+                root.write_text(
+                    root.read_text(encoding="utf-8") + "include parts/*.journal\n",
+                    encoding="utf-8",
+                )
+                subprocess.run(["git", "-C", tmp, "add", "-A"], check=True)
+                subprocess.run(["git", "-C", tmp, "commit", "-qm", "add include"], check=True)
+                if command_name == "ingest":
+                    batch = Path(tmp) / "batch.json"
+                    batch.write_text(
+                        json.dumps(
+                            {
+                                "transactions": [
+                                    {
+                                        "kind": "expense",
+                                        "date": "2026-01-01",
+                                        "description": "Race fixture",
+                                        "amount": "1",
+                                        "currency": "TWD",
+                                        "debit": "expenses:test",
+                                        "credit": "assets:cash",
+                                        "import_id": "race-fixture-1",
+                                        "tags": ["source:manual"],
+                                    }
+                                ]
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    command = base + ["ingest-json", str(batch)]
+                else:
+                    command = base + self.loan_resume_args()
+                before = root.read_bytes()
+                head_before = subprocess.run(
+                    ["git", "-C", tmp, "rev-parse", "HEAD"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                bin_dir = Path(tmp) / "bin"
+                bin_dir.mkdir()
+                wrapper = bin_dir / "hledger"
+                wrapper.write_text(wrapper_text, encoding="utf-8")
+                wrapper.chmod(0o755)
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "PATH": f"{bin_dir}{os.pathsep}{environment['PATH']}",
+                        "ADDED_SOURCE": str(parts / "added.journal"),
+                    }
+                )
+                result = subprocess.run(
+                    command,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                head_after = subprocess.run(
+                    ["git", "-C", tmp, "rev-parse", "HEAD"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                after = root.read_bytes()
+            self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+            self.assertIn("source set changed", result.stderr.lower())
+            self.assertEqual(after, before)
+            self.assertEqual(head_after, head_before)
+            self.assertNotIn("Traceback", result.stderr)
 
     def test_audit_waits_for_the_shared_journal_lock(self):
         script = SKILL_DIR / "scripts" / "finance.py"

@@ -21,7 +21,15 @@ import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from decimal import Decimal, DecimalException, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
+from decimal import (
+    Context,
+    Decimal,
+    DecimalException,
+    InvalidOperation,
+    ROUND_DOWN,
+    ROUND_HALF_UP,
+    localcontext,
+)
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -282,6 +290,18 @@ MAX_LOAN_PERIODS = 1200
 MAX_LOAN_DECIMAL_PLACES = 18
 MAX_LOAN_ADJUSTED_EXPONENT = 18
 MAX_LOAN_SIGNIFICANT_DIGITS = 38
+# Products can carry twice the accepted input precision before interest is
+# quantized. The guard digits cover division by 1200 and summing the maximum
+# principal parts without depending on the process-wide Decimal context.
+LOAN_ARITHMETIC_PRECISION = (
+    2 * MAX_LOAN_SIGNIFICANT_DIGITS + MAX_LOAN_DECIMAL_PLACES + 16
+)
+LOAN_ARITHMETIC_CONTEXT = Context(
+    prec=LOAN_ARITHMETIC_PRECISION,
+    rounding=ROUND_HALF_UP,
+    Emin=-999,
+    Emax=999,
+)
 _SOURCE_BOUNDARY_SENTINEL = "\x00hfin-source-boundary\x00"
 
 
@@ -764,61 +784,67 @@ def build_loan_resume_schedule(
         raise ValueError("Loan role accounts must not overlap")
 
     try:
-        monthly_rate = annual_rate / Decimal("100") / Decimal("12")
-        balance = principal
-        chunks: list[str] = []
-        periods: list[dict] = []
-        for offset in range(remaining_periods):
-            absolute_period = paid_periods + offset + 1
-            txn_date = add_months(start, offset)
-            opening = balance
-            interest = (balance * monthly_rate).quantize(
-                rounding_quantum, rounding=ROUND_HALF_UP
-            )
-            final = offset == remaining_periods - 1
-            principal_part = balance if final else payment - interest
-            if not final and principal_part <= 0:
-                raise ValueError(f"Loan period {absolute_period} has negative amortization")
-            if not final and principal_part >= balance:
-                raise ValueError(
-                    f"Loan would pay off before final period {total_periods}; "
-                    "correct the remaining periods"
+        with localcontext(LOAN_ARITHMETIC_CONTEXT):
+            monthly_rate = annual_rate / Decimal("100") / Decimal("12")
+            balance = principal
+            chunks: list[str] = []
+            periods: list[dict] = []
+            for offset in range(remaining_periods):
+                absolute_period = paid_periods + offset + 1
+                txn_date = add_months(start, offset)
+                opening = balance
+                interest = (balance * monthly_rate).quantize(
+                    rounding_quantum, rounding=ROUND_HALF_UP
                 )
-            payment_total = principal_part + interest
-            closing = balance - principal_part
-            import_id = _loan_import_id(loan_id, absolute_period)
-            periods.append(
-                {
-                    "period": absolute_period,
-                    "total_periods": total_periods,
-                    "date": txn_date,
-                    "opening_principal": opening,
-                    "principal": principal_part,
-                    "interest": interest,
-                    "payment": payment_total,
-                    "closing_principal": closing,
-                    "import_id": import_id,
-                }
-            )
-            chunks.append(
-                render_loan_payment(
-                    txn_date=txn_date,
-                    description=description,
-                    loan_id=loan_id,
-                    period=absolute_period,
-                    total_periods=total_periods,
-                    principal=principal_part,
-                    interest=interest,
-                    currency=currency,
-                    liability_account=liability_account,
-                    interest_account=interest_account,
-                    payment_account=payment_account,
+                final = offset == remaining_periods - 1
+                principal_part = balance if final else payment - interest
+                if not final and principal_part <= 0:
+                    raise ValueError(f"Loan period {absolute_period} has negative amortization")
+                if not final and principal_part >= balance:
+                    raise ValueError(
+                        f"Loan would pay off before final period {total_periods}; "
+                        "correct the remaining periods"
+                    )
+                payment_total = principal_part + interest
+                closing = balance - principal_part
+                import_id = _loan_import_id(loan_id, absolute_period)
+                periods.append(
+                    {
+                        "period": absolute_period,
+                        "total_periods": total_periods,
+                        "date": txn_date,
+                        "opening_principal": opening,
+                        "principal": principal_part,
+                        "interest": interest,
+                        "payment": payment_total,
+                        "closing_principal": closing,
+                        "import_id": import_id,
+                    }
                 )
+                chunks.append(
+                    render_loan_payment(
+                        txn_date=txn_date,
+                        description=description,
+                        loan_id=loan_id,
+                        period=absolute_period,
+                        total_periods=total_periods,
+                        principal=principal_part,
+                        interest=interest,
+                        currency=currency,
+                        liability_account=liability_account,
+                        interest_account=interest_account,
+                        payment_account=payment_account,
+                    )
+                )
+                balance = closing
+            principal_total = sum(
+                (period["principal"] for period in periods), Decimal("0")
             )
-            balance = closing
-        if balance != 0:
-            raise ValueError("Loan schedule did not clear the outstanding principal")
-        return "".join(chunks), periods
+            if principal_total != principal:
+                raise ValueError("Loan principal parts do not equal the outstanding principal")
+            if balance != 0 or periods[-1]["closing_principal"] != 0:
+                raise ValueError("Loan schedule did not clear the outstanding principal")
+            return "".join(chunks), periods
     except DecimalException as error:
         raise ValueError(f"Loan arithmetic failed: {error}") from error
 
@@ -3297,7 +3323,7 @@ def command_loan_resume(args: argparse.Namespace) -> int:
         for transaction in _load_journal_transactions(args.journal):
             for import_id in _transaction_tag_values(transaction).get("import-id", []):
                 transactions_by_id[import_id].append(transaction)
-        _verify_active_journal_sources(source_snapshots)
+        _verify_active_journal_sources(args.journal, source_snapshots)
         present = expected_ids & set(transactions_by_id)
         if present == expected_ids:
             exact = all(
@@ -3323,6 +3349,7 @@ def command_loan_resume(args: argparse.Namespace) -> int:
                 "Partial loan schedule import-ID collision; refusing to append any payments"
             )
         if not args.preview:
+            _verify_active_journal_sources(args.journal, source_snapshots)
             _append_validated_and_commit_locked(
                 args.journal,
                 schedule,
@@ -3411,27 +3438,83 @@ def _snapshot_active_journal_source(filename: str) -> _JournalSourceSnapshot:
             os.close(descriptor)
 
 
-def _snapshot_active_journal_sources(
-    journal: Path,
-) -> dict[str, _JournalSourceSnapshot]:
+def _canonical_journal_source(filename: str | os.PathLike[str]) -> str:
+    """Canonicalize a source name without following a potentially raced symlink."""
+    return os.path.abspath(os.path.normpath(os.fspath(filename)))
+
+
+def _enumerate_active_journal_sources(journal: Path) -> tuple[str, ...]:
     result = _run(["hledger", "-f", str(journal), "files"], capture=True)
     if result.returncode:
         raise ValueError(result.stderr.strip() or "Could not list active journal files")
-    snapshots: dict[str, _JournalSourceSnapshot] = {}
-    for filename in result.stdout.splitlines():
-        if not filename.strip():
+    filenames: list[str] = []
+    seen: set[str] = set()
+    for reported in result.stdout.splitlines():
+        if not reported.strip():
             continue
-        if filename in snapshots:
+        filename = _canonical_journal_source(reported)
+        if filename in seen:
             raise ValueError(f"Ambiguous duplicate active journal source: {filename}")
-        snapshots[filename] = _snapshot_active_journal_source(filename)
-    if not snapshots:
+        seen.add(filename)
+        filenames.append(filename)
+    if not filenames:
         raise ValueError("Could not identify any active journal source files")
+    return tuple(filenames)
+
+
+def _journal_source_matches(
+    original: _JournalSourceSnapshot, current: _JournalSourceSnapshot
+) -> bool:
+    return (
+        (current.device, current.inode) == (original.device, original.inode)
+        and (current.size, current.mtime_ns, current.ctime_ns)
+        == (original.size, original.mtime_ns, original.ctime_ns)
+        and current.digest == original.digest
+    )
+
+
+def _snapshot_active_journal_sources(
+    journal: Path,
+) -> dict[str, _JournalSourceSnapshot]:
+    canonical_root = _canonical_journal_source(journal)
+    root_before_enumeration = _snapshot_active_journal_source(canonical_root)
+    filenames = _enumerate_active_journal_sources(journal)
+    if canonical_root not in filenames:
+        raise ValueError("Active journal source set does not contain the root journal")
+    snapshots = {
+        filename: _snapshot_active_journal_source(filename) for filename in filenames
+    }
+    if not _journal_source_matches(
+        root_before_enumeration, snapshots[canonical_root]
+    ):
+        raise ValueError("Root journal changed during active source enumeration")
     return snapshots
 
 
 def _verify_active_journal_sources(
+    journal: Path,
     expected: dict[str, _JournalSourceSnapshot],
 ) -> None:
+    try:
+        current_filenames = _enumerate_active_journal_sources(journal)
+    except ValueError as error:
+        raise ValueError(
+            f"Journal active source set changed during hledger parsing: {error}"
+        ) from error
+    expected_set = set(expected)
+    current_set = set(current_filenames)
+    if current_set != expected_set:
+        added = sorted(current_set - expected_set)
+        removed = sorted(expected_set - current_set)
+        details = []
+        if added:
+            details.append(f"added: {', '.join(added)}")
+        if removed:
+            details.append(f"removed: {', '.join(removed)}")
+        raise ValueError(
+            "Journal active source set changed during hledger parsing"
+            + (f" ({'; '.join(details)})" if details else "")
+        )
     for filename, original in expected.items():
         try:
             current = _snapshot_active_journal_source(filename)
@@ -3439,23 +3522,14 @@ def _verify_active_journal_sources(
             raise ValueError(
                 f"Journal source {filename} changed during hledger parsing: {error}"
             ) from error
-        original_identity = (original.device, original.inode)
-        current_identity = (current.device, current.inode)
-        original_metadata = (original.size, original.mtime_ns, original.ctime_ns)
-        current_metadata = (current.size, current.mtime_ns, current.ctime_ns)
-        if (
-            current_identity != original_identity
-            or current_metadata != original_metadata
-            or current.digest != original.digest
-        ):
+        if not _journal_source_matches(original, current):
             raise ValueError(f"Journal source {filename} changed during hledger parsing")
 
 
 def _read_active_journal_sources(journal: Path) -> dict[str, str]:
-    return {
-        filename: snapshot.text
-        for filename, snapshot in _snapshot_active_journal_sources(journal).items()
-    }
+    snapshots = _snapshot_active_journal_sources(journal)
+    _verify_active_journal_sources(journal, snapshots)
+    return {filename: snapshot.text for filename, snapshot in snapshots.items()}
 
 
 def _read_active_journal_text(journal: Path) -> str:
@@ -3474,13 +3548,20 @@ def command_ingest_json(args: argparse.Namespace) -> int:
     payload = parse_ingest_json(raw)
     with _acquire_journal_lock(args.journal):
         _require_regular_journal(args.journal)
+        source_snapshots = _snapshot_active_journal_sources(args.journal)
+        active_journal_text = f"\n{_SOURCE_BOUNDARY_SENTINEL}\n".join(
+            snapshot.text for snapshot in source_snapshots.values()
+        )
+        classification_transactions = _load_classification_history(args.journal)
+        _verify_active_journal_sources(args.journal, source_snapshots)
         journal_text, imported, skipped, decisions = build_ingest_transactions(
             payload,
-            existing_text=_read_active_journal_text(args.journal),
-            classification_transactions=_load_classification_history(args.journal),
+            existing_text=active_journal_text,
+            classification_transactions=classification_transactions,
             classification_rules=_load_classification_rules(args.journal),
             payment_account_rules=_load_payment_account_rules(args.journal),
         )
+        _verify_active_journal_sources(args.journal, source_snapshots)
         if journal_text and not args.preview:
             _append_validated_and_commit_locked(
                 args.journal,
@@ -3511,9 +3592,15 @@ def command_import_csv(args: argparse.Namespace) -> int:
         rows = list(csv.DictReader(handle))
     with _acquire_journal_lock(args.journal):
         _require_regular_journal(args.journal)
+        source_snapshots = _snapshot_active_journal_sources(args.journal)
+        active_journal_text = f"\n{_SOURCE_BOUNDARY_SENTINEL}\n".join(
+            snapshot.text for snapshot in source_snapshots.values()
+        )
+        classification_transactions = _load_classification_history(args.journal)
+        _verify_active_journal_sources(args.journal, source_snapshots)
         journal_text, imported, skipped = import_csv_transactions(
             rows=rows,
-            existing_text=_read_active_journal_text(args.journal),
+            existing_text=active_journal_text,
             default_debit=args.debit,
             credit_account=args.credit,
             currency=args.currency,
@@ -3525,9 +3612,10 @@ def command_import_csv(args: argparse.Namespace) -> int:
             category_column=args.category_column,
             default_installments=args.installments,
             category_prefix=args.category_prefix,
-            classification_transactions=_load_classification_history(args.journal),
+            classification_transactions=classification_transactions,
             classification_rules=_load_classification_rules(args.journal),
         )
+        _verify_active_journal_sources(args.journal, source_snapshots)
         if journal_text and not args.preview:
             _append_validated_and_commit_locked(
                 args.journal,
@@ -3584,7 +3672,7 @@ def command_audit(args: argparse.Namespace) -> int:
         )
         if result.returncode:
             raise ValueError(result.stderr.strip() or "Could not read journal for audit")
-        _verify_active_journal_sources(source_snapshots)
+        _verify_active_journal_sources(args.journal, source_snapshots)
         transactions = json.loads(result.stdout)
     report = audit_journal(
         transactions, active_journal_text, source_texts=active_sources
