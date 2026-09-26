@@ -305,26 +305,84 @@ LOAN_ARITHMETIC_CONTEXT = Context(
 _SOURCE_BOUNDARY_SENTINEL = "\x00hfin-source-boundary\x00"
 
 
+# Product/purpose evidence precedes merchant/location defaults. English tokens
+# use boundaries: coffee != fee, parent != rent, carpet != pet.
 BUILTIN_CATEGORY_RULES: tuple[tuple[str, str], ...] = (
-    (r"(?:uber\s*eats|ubereats|foodpanda|熊貓外送)", "expenses:food:delivery"),
-    (r"(?:全聯|px\s*mart|家樂福|carrefour|costco|好市多|超市|grocery|菜市場)", "expenses:food:groceries"),
-    (r"(?:7[\s-]?11|統一超商|全家|familymart|萊爾富|ok超商)", "expenses:food:convenience"),
-    (r"(?:早餐|午餐|晚餐|便當|餐廳|拉麵|火鍋|麥當勞|肯德基|咖啡|星巴克|restaurant|cafe)", "expenses:food:dining"),
-    (r"(?:uber(?!\s*eats)|計程車|taxi|台灣大車隊)", "expenses:transport:taxi"),
-    (r"(?:高鐵|台鐵|捷運|公車|客運|thsr|railway)", "expenses:transport:transit"),
-    (r"(?:中油|台塑石油|加油|gasoline|fuel|停車|parking)", "expenses:transport:driving"),
-    (r"(?:中華電信|台灣大哥大|遠傳|水費|電費|瓦斯|網路費|電話費|internet|utility)", "expenses:utilities"),
-    (r"(?:房租|租金|管理費|rent|mortgage)", "expenses:housing"),
-    (r"(?:醫院|診所|藥局|掛號|看醫生|牙醫|medical|pharmacy)", "expenses:health"),
-    (r"(?:學費|書店|課程|補習|udemy|coursera|education|tuition)", "expenses:education"),
-    (r"(?:netflix|spotify|youtube\s*premium|disney(?:\+|\s+plus)?|訂閱|subscription)", "expenses:subscriptions"),
-    (r"(?:電影|影城|遊戲|steam|演唱會|娛樂|cinema)", "expenses:entertainment"),
-    (r"(?:momo|pchome|蝦皮|shopee|amazon|uniqlo|無印良品|網購)", "expenses:shopping"),
-    (r"(?:機票|航空|飯店|旅館|住宿|airbnb|booking(?:\.|\s*)com|travel)", "expenses:travel"),
-    (r"(?:手續費|年費|利息|fee|bank\s*charge)", "expenses:fees"),
-    (r"(?:寵物|獸醫|飼料|pet)", "expenses:pets"),
-    (r"(?:捐款|donation|慈善)", "expenses:donations"),
+    (r"(?:早餐|午餐|晚餐|便當|餐廳|拉麵|火鍋|吃飯|\b(?:restaurant|lunch|dinner|breakfast)\b)", "expenses:food:dining"),
+    (r"(?:紅豆餅|車輪餅|雞蛋糕|蛋糕|餅乾|冰淇淋|甜點|點心|布丁|豆花|\b(?:snacks?|dessert)\b)", "expenses:food:snacks"),
+    (r"(?:咖啡|奶茶|手搖飲|礦泉水|拿鐵|茶飲|飲料|\b(?:coffee|latte|tea)\b)", "expenses:food:drinks"),
+    (r"(?:買菜|雞蛋|蔬菜|水果|牛肉|豬肉|食材|菜市場|\bgrocer(?:y|ies)\b)", "expenses:food:groceries"),
+    (r"(?:計程車|台灣大車隊|\btaxi\b)", "expenses:transport:taxi"),
+    (r"(?:悠遊卡|高鐵|台鐵|捷運|公車|客運|\b(?:thsr|railway)\b)", "expenses:transport:transit"),
+    (r"(?:加油|停車|汽車保養|汽車維修|\b(?:gasoline|fuel|parking)\b)", "expenses:transport:driving"),
+    (r"(?:水費|電費|瓦斯費?|網路費|電話費|\b(?:internet|utility)\b)", "expenses:utilities"),
+    (r"(?:房租|租金|管理費|水電修繕|房屋修繕|\brent\b)", "expenses:housing"),
+    (r"(?:醫院|診所|藥局|掛號|看醫生|牙醫|健檢|\b(?:medical|pharmacy)\b)", "expenses:health"),
+    (r"(?:學費|書店|課程|補習|\b(?:education|tuition)\b)", "expenses:education"),
+    (r"(?:訂閱|\bsubscription\b)", "expenses:subscriptions"),
+    (r"(?:電影|影城|遊戲|演唱會|娛樂|桌遊|\b(?:cinema|ktv)\b)", "expenses:entertainment"),
+    (r"(?:刮刮樂|彩券|樂透)", "expenses:entertainment:lottery"),
+    (r"(?:機票|住宿|旅行團)", "expenses:travel"),
+    (r"(?:手續費|年費|\bbank\s*charges?\b)", "expenses:fees"),
+    (r"(?:(?:貸款|信貸|房貸|車貸)利息|\bloan\s+interest\b)", "expenses:interest:loan"),
+    (r"(?:寵物|獸醫|飼料|貓砂|狗狗美容|\bpet\b)", "expenses:pets"),
+    (r"(?:捐款|慈善|教會奉獻|\bdonation\b)", "expenses:donations"),
+    (r"(?:紅包|禮金|孝親費|禮物|奠儀)", "expenses:gifts"),
+    (r"(?:保險|強制險|平安險|火險|\binsurance\b)", "expenses:insurance"),
+    (r"(?:所得稅|房屋稅|地價稅|牌照稅|印花稅|燃料稅|燃料費)", "expenses:taxes"),
+    (r"(?:健身房|游泳池|羽球場租|瑜珈|健身教練|運動中心)", "expenses:sports"),
+    (r"(?:剪髮|理髮|洗髮精|牙膏|化妝品|保養品)", "expenses:personal-care"),
 )
+
+MERCHANT_CATEGORY_RULES: tuple[tuple[str, str], ...] = (
+    (r"(?:全聯|家樂福|好市多|超市|\b(?:px\s*mart|carrefour|costco)\b)", "expenses:food:groceries"),
+    (r"(?:\b7[\s-]?11\b|統一超商|全家|萊爾富|ok超商|\bfamilymart\b)", "expenses:food:convenience"),
+    (r"(?:麥當勞|肯德基|\brestaurant\b)", "expenses:food:dining"),
+    (r"(?:星巴克|\bcafe\b)", "expenses:food:drinks"),
+    (r"\buber(?!\s*eats)\b", "expenses:transport:taxi"),
+    (r"(?:中油|台塑石油)", "expenses:transport:driving"),
+    (r"(?:中華電信|台灣大哥大|遠傳)", "expenses:utilities"),
+    (r"\b(?:udemy|coursera)\b", "expenses:education"),
+    (r"(?:\b(?:netflix|spotify|youtube\s*premium)\b|\bdisney(?:\+|\s+plus\b))", "expenses:subscriptions"),
+    (r"\bsteam\b", "expenses:entertainment"),
+    (r"(?:蝦皮|無印良品|網購|\b(?:momo|pchome|shopee|amazon|uniqlo)\b)", "expenses:shopping"),
+    (r"(?:航空|飯店|旅館|\b(?:airbnb|booking(?:\.|\s*)com|travel)\b)", "expenses:travel"),
+)
+
+# The model chooses from this catalog (plus accounts already in the journal);
+# rule output is evidence for that choice, not the decision itself.
+CATEGORY_CATALOG: tuple[tuple[str, str], ...] = (
+    ("expenses:food:dining", "早餐、午餐、晚餐、便當、餐廳"),
+    ("expenses:food:snacks", "紅豆餅、雞蛋糕、餅乾、甜點、冰淇淋"),
+    ("expenses:food:drinks", "咖啡、奶茶、礦泉水、拿鐵"),
+    ("expenses:food:groceries", "生鮮食材、蔬果、雞蛋、肉品"),
+    ("expenses:food:delivery", "明確餐點外送服務／平台"),
+    ("expenses:food:convenience", "只知便利商店、尚無商品明細"),
+    ("expenses:transport:taxi", "Uber 搭車、計程車"),
+    ("expenses:transport:transit", "悠遊卡、高鐵、台鐵、捷運、公車"),
+    ("expenses:transport:driving", "停車、加油、汽車保養維修；不含保險與稅"),
+    ("expenses:housing", "房租、管理費、房屋修繕；不含房貸本金"),
+    ("expenses:utilities", "水電瓦斯、電話、網路"),
+    ("expenses:health", "人的醫療、掛號、藥品、牙醫、健檢"),
+    ("expenses:education", "學費、書籍、課程、補習"),
+    ("expenses:subscriptions", "影音、音樂、軟體與雲端訂閱"),
+    ("expenses:entertainment", "電影、遊戲、演唱會、KTV、桌遊"),
+    ("expenses:entertainment:lottery", "刮刮樂、彩券、樂透"),
+    ("expenses:shopping", "一般購物或只有電商名稱且用途未知"),
+    ("expenses:travel", "機票、住宿、旅行團；不是所有旅行期間的消費"),
+    ("expenses:fees", "銀行手續費、信用卡年費"),
+    ("expenses:interest:loan", "明確貸款利息，不含本金"),
+    ("expenses:pets", "飼料、貓砂、獸醫、寵物用品及美容"),
+    ("expenses:donations", "公益、慈善、宗教奉獻"),
+    ("expenses:gifts", "紅包、禮金、孝親費、禮物、奠儀"),
+    ("expenses:insurance", "汽機車、人壽、醫療、旅平、住宅保險"),
+    ("expenses:taxes", "所得稅、房屋稅、地價稅、牌照稅、燃料稅費"),
+    ("expenses:sports", "健身房、運動場館、瑜珈、教練"),
+    ("expenses:personal-care", "理髮、洗髮精、牙膏、化妝保養品"),
+    ("expenses:uncategorized", "無法可靠決定或尚未拆分的混合用途"),
+)
+
+FOOD_DELIVERY_PATTERN = r"(?:\b(?:uber\s*eats|ubereats|foodpanda)\b|熊貓外送|餐點外送費)"
 
 
 def _literal_description(value: str) -> str:
@@ -354,21 +412,29 @@ def _posting_magnitude(posting: dict) -> Decimal:
 def _history_expense_accounts(transactions: Sequence[dict]) -> list[tuple[str, str]]:
     history: list[tuple[str, str]] = []
     for transaction in transactions:
-        description = _normalize_description(str(transaction.get("tdescription", "")))
+        raw = str(transaction.get("tdescription", ""))
+        # Later installments repeat one purchase, not independent observations.
+        installment = re.search(r"\[\s*(\d+)\s*/\s*\d+\s*\]", raw)
+        if installment and installment.group(1).lstrip("0") != "1":
+            continue
+        description = _normalize_description(raw)
         if not description:
             continue
-        expense_postings = [
-            (index, posting)
-            for index, posting in enumerate(transaction.get("tpostings", []))
-            if (str(posting.get("paccount", "")) == "expenses" or str(posting.get("paccount", "")).startswith("expenses:"))
-        ]
-        if not expense_postings:
+        postings = [p for p in transaction.get("tpostings", [])
+                    if str(p.get("paccount", "")).startswith("expenses:")]
+        accounts = {str(p["paccount"]) for p in postings}
+        # Only a strictly smaller, same-currency ancillary fee can be ignored.
+        # Never compare or sum the magnitudes of different commodities.
+        if len(accounts) == 2 and "expenses:fees" in accounts:
+            currencies = {a.get("acommodity") for p in postings for a in p.get("pamount", [])}
+            if len(currencies) == 1 and None not in currencies and "" not in currencies:
+                fees = sum((_posting_magnitude(p) for p in postings if p["paccount"] == "expenses:fees"), Decimal(0))
+                purchase = sum((_posting_magnitude(p) for p in postings if p["paccount"] != "expenses:fees"), Decimal(0))
+                if 0 < fees < purchase:
+                    accounts.discard("expenses:fees")
+        if len(accounts) != 1 or "expenses:uncategorized" in accounts:
             continue
-        _index, primary = max(
-            expense_postings,
-            key=lambda item: (_posting_magnitude(item[1]), -item[0]),
-        )
-        history.append((description, str(primary.get("paccount", ""))))
+        history.append((description, next(iter(accounts))))
     return history
 
 
@@ -378,64 +444,134 @@ def classify_description(
     transactions: Sequence[dict] = (),
     rules: Sequence[dict[str, str]] = (),
 ) -> dict:
-    """Choose an expense account from custom rules, history, and built-ins."""
+    """Choose a purpose, never blindly copy the last similarly named expense.
+
+    Scores describe rule strength, not calibrated correctness probabilities.
+    This function classifies expenses only; it never determines transaction kind.
+    """
     cleaned = _validate_text(description, "Description")
     literal = _literal_description(cleaned)
     normalized = _normalize_description(cleaned)
+    fallback = {"account": "expenses:uncategorized", "source": "fallback",
+                "confidence": 0.25, "matched": None}
 
+    custom = []
     for rule in rules:
         pattern = _literal_description(str(rule.get("pattern", "")))
         account = str(rule.get("account", "")).strip()
-        if not pattern or not (account == "expenses" or account.startswith("expenses:")):
-            continue
-        if pattern in literal:
-            return {
-                "account": account,
-                "source": "custom-rule",
-                "confidence": 1.0,
-                "matched": str(rule.get("pattern", "")),
-            }
+        if pattern and (account == "expenses" or account.startswith("expenses:")) and pattern in literal:
+            custom.append((len(pattern), pattern, account))
+    if custom:
+        longest = max(row[0] for row in custom)
+        winners = sorted({(p, a) for length, p, a in custom if length == longest})
+        if len({a for _, a in winners}) != 1:
+            return {**fallback, "reason": "conflicting-custom-rules"}
+        pattern, account = winners[0]
+        return {"account": account, "source": "custom-rule", "confidence": 1.0, "matched": pattern}
 
-    best_history: tuple[float, str, str] | None = None
-    for previous_description, account in _history_expense_accounts(transactions):
-        if previous_description == normalized:
+    spans = [(match.start(), match.end(), account, match.group(0))
+             for pattern, account in BUILTIN_CATEGORY_RULES
+             for match in re.finditer(pattern, literal)]
+    # A named item is stronger than an ingredient embedded inside its name:
+    # 雞蛋糕 is a snack; 雞蛋糕和雞蛋 still contains two independent purposes.
+    purposes = {}
+    for start, end, account, matched in spans:
+        if any(left <= start and end <= right and right - left > end - start
+               for left, right, _, _ in spans):
+            continue
+        purposes[account] = matched
+    delivery = re.search(FOOD_DELIVERY_PATTERN, literal)
+    if delivery:
+        # Food delivery may describe meals AND drinks. Non-food purpose evidence
+        # remains conflicting rather than being overwritten by a platform name.
+        purposes = {a: m for a, m in purposes.items() if not a.startswith("expenses:food:")}
+        purposes["expenses:food:delivery"] = delivery.group(0)
+    if len(purposes) > 1:
+        return {**fallback, "reason": "mixed-purposes", "candidates": sorted(purposes)}
+    purpose = next(iter(purposes), None)
+
+    matches = []
+    for previous, account in _history_expense_accounts(transactions):
+        if previous == normalized:
             score = 0.99
-        elif min(len(previous_description), len(normalized)) >= 4 and (
-            previous_description in normalized or normalized in previous_description
-        ):
+        elif min(len(previous), len(normalized)) < 4:
+            continue
+        elif previous in normalized or normalized in previous:
             score = 0.91
         else:
-            similarity = SequenceMatcher(None, normalized, previous_description).ratio()
+            similarity = SequenceMatcher(None, normalized, previous).ratio()
             if similarity < 0.86:
                 continue
             score = min(0.89, similarity)
-        candidate = (score, account, previous_description)
-        if best_history is None or score >= best_history[0]:
-            best_history = candidate
-    if best_history is not None:
-        score, account, matched = best_history
-        return {
-            "account": account,
-            "source": "history",
-            "confidence": round(score, 2),
-            "matched": matched,
-        }
-
-    for pattern, account in BUILTIN_CATEGORY_RULES:
-        match = re.search(pattern, literal, flags=re.IGNORECASE)
-        if match:
-            return {
-                "account": account,
-                "source": "builtin-rule",
-                "confidence": 0.93,
-                "matched": match.group(0),
+        matches.append((score, previous, account))
+    if matches:
+        strongest = max(row[0] for row in matches)
+        peers = [row for row in matches if row[0] == strongest]
+        counts = {}
+        for _, _, account in peers:
+            counts[account] = counts.get(account, 0) + 1
+        account, support = max(counts.items(), key=lambda row: (row[1], row[0]))
+        # Require >=3 supporting purchases, not merely >=3 total observations.
+        if support >= 3 and support * 5 >= len(peers) * 4:
+            aliases = {
+                "expenses:food:drinks": {"expenses:food:coffee", "expenses:food:tea"},
+                "expenses:food:dining": {"expenses:food:breakfast", "expenses:food:lunch", "expenses:food:dinner"},
             }
+            compatible = (purpose is None or account == purpose or account.startswith(purpose + ":")
+                          or account in aliases.get(purpose, set()))
+            if compatible:
+                return {"account": account, "source": "history", "confidence": round(strongest, 2),
+                        "matched": min(p for _, p, a in peers if a == account),
+                        "support": support, "observations": len(peers), "agreement": support / len(peers)}
+    if purpose:
+        return {"account": purpose, "source": "builtin-rule", "confidence": 0.93,
+                "matched": purposes[purpose]}
+    merchants = {}
+    for pattern, account in MERCHANT_CATEGORY_RULES:
+        match = re.search(pattern, literal)
+        if match:
+            merchants[account] = match.group(0)
+    if len(merchants) == 1:
+        account = next(iter(merchants))
+        return {"account": account, "source": "builtin-rule", "confidence": 0.70,
+                "matched": merchants[account]}
+    return {**fallback, "reason": "conflicting-merchants" if merchants else "insufficient-evidence"}
 
+
+def classification_candidates(
+    description: str,
+    *,
+    transactions: Sequence[dict] = (),
+    rules: Sequence[dict[str, str]] = (),
+) -> dict:
+    """Return every selectable expense category for the model to choose from.
+
+    The rule-based decision is kept as ``suggestion`` evidence. Only a custom
+    rule (an explicit, persisted user preference) is binding.
+    """
+    decision = classify_description(description, transactions=transactions, rules=rules)
+    counts: dict[str, int] = {}
+    for transaction in transactions:
+        accounts = {str(p.get("paccount", "")) for p in transaction.get("tpostings", [])}
+        for account in accounts:
+            if account.startswith("expenses:"):
+                counts[account] = counts.get(account, 0) + 1
+    catalog = dict(CATEGORY_CATALOG)
+    categories = [
+        {"account": account, "description": text, "standard": True,
+         "journal_count": counts.get(account, 0)}
+        for account, text in CATEGORY_CATALOG
+    ]
+    categories += [
+        {"account": account, "description": None, "standard": False, "journal_count": count}
+        for account, count in sorted(counts.items(), key=lambda row: (-row[1], row[0]))
+        if account not in catalog
+    ]
     return {
-        "account": "expenses:uncategorized",
-        "source": "fallback",
-        "confidence": 0.25,
-        "matched": None,
+        "description": description,
+        "binding": decision["source"] == "custom-rule",
+        "suggestion": decision,
+        "categories": categories,
     }
 
 
@@ -3197,7 +3333,14 @@ def _resolve_debit_account(journal: Path, description: str, debit: str | None) -
 
 def command_classify(args: argparse.Namespace) -> int:
     _ensure_journal(args.journal)
-    decision = _auto_debit(args.journal, args.description)
+    if args.rules_only:
+        decision = _auto_debit(args.journal, args.description)
+    else:
+        decision = classification_candidates(
+            args.description,
+            transactions=_load_classification_history(args.journal),
+            rules=_load_classification_rules(args.journal),
+        )
     print(json.dumps(decision, ensure_ascii=False, indent=2))
     return 0
 
@@ -4053,8 +4196,13 @@ def build_parser() -> argparse.ArgumentParser:
     add_parser.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)
     add_parser.set_defaults(func=command_add)
 
-    classify_parser = subparsers.add_parser("classify", help="Suggest an expense category from rules and history")
+    classify_parser = subparsers.add_parser(
+        "classify", help="List every expense category plus rule/history evidence for the model to choose from"
+    )
     classify_parser.add_argument("--description", required=True)
+    classify_parser.add_argument(
+        "--rules-only", action="store_true", help="Print only the deterministic rule/history decision"
+    )
     classify_parser.set_defaults(func=command_classify)
 
     installment_parser = subparsers.add_parser("installment", help="Create N exact monthly installments")

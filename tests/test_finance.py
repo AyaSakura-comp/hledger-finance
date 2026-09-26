@@ -17,6 +17,7 @@ from unittest import mock
 SKILL_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_DIR))
 
+import scripts.finance as finance  # noqa: E402
 from scripts.finance import (  # noqa: E402
     _acquire_journal_lock,
     _amount_decimal,
@@ -613,14 +614,15 @@ class ClassificationTests(unittest.TestCase):
         )
         self.assertNotEqual(result["account"], "expenses:education:programming")
 
-    def test_matching_history_reuses_the_previous_expense_account(self):
+    def test_consistent_history_reuses_the_previous_expense_account(self):
         history = [
             {
                 "tdescription": "藍瓶咖啡 台北",
                 "tpostings": [{"paccount": "expenses:food:coffee", "pamount": []}],
             }
         ]
-        result = classify_description("藍瓶咖啡 台北", transactions=history)
+        # Three independent purchases are required by the consensus policy.
+        result = classify_description("藍瓶咖啡 台北", transactions=history * 3)
         self.assertEqual(result["account"], "expenses:food:coffee")
         self.assertEqual(result["source"], "history")
 
@@ -640,16 +642,18 @@ class ClassificationTests(unittest.TestCase):
                 ],
             }
         ]
-        result = classify_description("Phone", transactions=history)
+        result = classify_description("Phone", transactions=history * 3)
         self.assertEqual(result["account"], "expenses:electronics")
 
-    def test_latest_equal_history_match_wins_after_a_user_correction(self):
+    def test_explicit_correction_rule_wins_over_inconsistent_history(self):
         history = [
             {"tdescription": "Corner Cafe", "tpostings": [{"paccount": "expenses:misc"}]},
             {"tdescription": "Corner Cafe", "tpostings": [{"paccount": "expenses:food:coffee"}]},
         ]
-        result = classify_description("Corner Cafe", transactions=history)
+        result = classify_description("Corner Cafe", transactions=history,
+                                      rules=[{"pattern": "Corner Cafe", "account": "expenses:food:coffee"}])
         self.assertEqual(result["account"], "expenses:food:coffee")
+        self.assertEqual(result["source"], "custom-rule")
 
     def test_unknown_description_uses_reviewable_fallback(self):
         result = classify_description("XYZ-9482")
@@ -5404,8 +5408,44 @@ class CliWriteBehaviorTests(unittest.TestCase):
             )
             decision = json.loads(result.stdout)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(decision["account"], "expenses:pets:supplies")
-        self.assertEqual(decision["source"], "custom-rule")
+        self.assertTrue(decision["binding"])
+        self.assertEqual(decision["suggestion"]["account"], "expenses:pets:supplies")
+        self.assertEqual(decision["suggestion"]["source"], "custom-rule")
+
+    def test_classify_command_lists_all_categories_for_model_choice(self):
+        script = SKILL_DIR / "scripts" / "finance.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Path(tmp) / "main.journal"
+            base = [sys.executable, str(script), "--journal", str(journal)]
+            subprocess.run(base + ["init"], check=True, capture_output=True, text=True)
+            subprocess.run(
+                base + ["add", "--date", "2026-01-02", "--description", "貓咪零食",
+                        "--amount", "120", "--debit", "expenses:shopping:pet-supplies",
+                        "--credit", "assets:cash"],
+                check=True, capture_output=True, text=True,
+            )
+            result = subprocess.run(
+                base + ["classify", "--description", "某某新店"],
+                check=False, capture_output=True, text=True,
+            )
+            payload = json.loads(result.stdout)
+            rules_only = subprocess.run(
+                base + ["classify", "--rules-only", "--description", "某某新店"],
+                check=False, capture_output=True, text=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(payload["binding"])
+        self.assertEqual(payload["suggestion"]["reason"], "insufficient-evidence")
+        accounts = {row["account"]: row for row in payload["categories"]}
+        self.assertEqual({a for a, _ in finance.CATEGORY_CATALOG} - set(accounts), set())
+        self.assertFalse(accounts["expenses:shopping:pet-supplies"]["standard"])
+        self.assertEqual(accounts["expenses:shopping:pet-supplies"]["journal_count"], 1)
+        self.assertEqual(json.loads(rules_only.stdout)["account"], "expenses:uncategorized")
+
+    def test_category_catalog_covers_every_rule_account(self):
+        catalog = {account for account, _ in finance.CATEGORY_CATALOG}
+        rule_accounts = {a for _, a in finance.BUILTIN_CATEGORY_RULES + finance.MERCHANT_CATEGORY_RULES}
+        self.assertEqual(rule_accounts - catalog, set())
 
     def test_visualize_command_generates_dashboard_for_filtered_period(self):
         from PIL import Image

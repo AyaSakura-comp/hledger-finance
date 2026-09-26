@@ -146,10 +146,18 @@ Add `--preview` to inspect the complete schedule without changing the journal or
 Automatic classification uses this precedence:
 
 1. An explicit debit account
-2. Literal custom rules from `~/finance/classification-rules.json`
-3. Exact or fuzzy historical transaction matches
-4. Built-in Taiwan-oriented merchant and keyword rules
-5. `expenses:uncategorized` as a reviewable fallback
+2. Literal custom rules from `~/finance/classification-rules.json` (longest match; equal-specificity conflicts abstain)
+3. Clear product/purpose rules, protected from contradictory historical categories
+4. Historical consensus: >=3 supporting purchases and >=80% agreement among the strongest matches; compatible fine-grained categories can refine purpose rules
+5. Merchant-only defaults, then reviewable `expenses:uncategorized` when evidence is absent or conflicting
+
+See [the category standard](references/CLASSIFICATION.md) for 25 ordinary category groups, mixed purchases, non-expense boundaries and permanent preferences. A travel meal remains food; an online purchase of cat litter is pets. Scores are heuristic, not calibrated probabilities. Single-row corrections are not automatically persisted as rules, and no historical journal is automatically rewritten.
+
+Run the fixed 200-case classification matrix (JSON and Markdown reports; no production journal access):
+
+```bash
+python3 tests/test_classification_scenarios.py --report /tmp/hfin-classification-200
+```
 
 Generic `add` requires either an explicit debit account or `--debit auto`, preventing omitted accounts on income, refunds, and transfers from being silently recorded as expenses.
 

@@ -10,7 +10,7 @@
 
 ## Category inference
 
-Automatic categorization applies only to ordinary expenses. Priority is explicit account, custom literal rule, matching journal history, built-in merchant/keyword rules, then agent semantic judgment. Income, transfers, refunds, receivables, loans, assets, and liabilities must use their economic posting direction instead of being forced into an expense category.
+Automatic categorization applies only to ordinary expenses. Priority is explicit account, custom literal rule, clear product/purpose, compatible historical consensus (>=3 supporting purchases and >=80% agreement), then merchant-only defaults. The last matching historical row never wins by itself. Follow [CLASSIFICATION.md](CLASSIFICATION.md) for semantic interpretation and conflict handling. Income, transfers, refunds, receivables, loans, assets, and liabilities must use their economic posting direction instead of being forced into an expense category.
 
 Prefer stable, reusable hierarchies and existing accounts. For example, use `expenses:food:groceries` consistently rather than creating both `expenses:groceries` and `expenses:food:supermarket` for the same meaning.
 

@@ -30,7 +30,7 @@ hfin import-csv FILE \
 - `--installment-column NAME`: row-specific count; blank cells fall back to `--installments`.
 - `--id-column NAME`: always required; every row must contain a non-empty canonical ID. Stores `import-id:VALUE`; repeats are skipped. There is no missing-ID mode.
 - `--category-column NAME`: creates `CATEGORY_PREFIX:VALUE`; blank values use `--debit`.
-- `--debit auto` is the default. Rows without a category are inferred from custom literal rules, journal history, then built-in merchant/keyword rules. Unknown rows use `expenses:uncategorized` and remain easy to review. This is a narrow exception for this positive-expense-only command: structured or historical records sent through `ingest-json` must provide explicit debit and credit accounts.
+- `--debit auto` is the default. Rows without a category use custom literal rules, protected product/purpose rules, compatible historical consensus (>=3 supporting purchases and >=80% agreement), then merchant-only defaults. Unknown or conflicting rows use `expenses:uncategorized` and remain easy to review. See [CLASSIFICATION.md](CLASSIFICATION.md). This is a narrow exception for this positive-expense-only command: structured or historical records sent through `ingest-json` must provide explicit debit and credit accounts.
 - `--encoding`: defaults to `utf-8-sig`, which handles UTF-8 files with a BOM.
 
 ## Required workflow
