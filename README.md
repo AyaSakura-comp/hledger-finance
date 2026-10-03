@@ -4,6 +4,12 @@ A complete Pi/Hermes agent skill and deterministic `hfin` CLI for personal finan
 
 The repository contains the whole installable skill: CLI source, agent instructions, accounting references, visualization QA, and tests. Personal journals are **not** stored in this repository.
 
+## Experimental Pi extension
+
+An optional single-expense FSM is available in [`extension/`](extension/README.md), with temporary loading, project-local `pi install`, removal, and testing instructions. The root `package.json` exposes it as a Pi Git/local package. **It is not production-ready or a replacement for the full skill**; use an initialized disposable journal with `PI_FINANCE_JOURNAL`. Installation is opt-in and does not change your ledger or model configuration.
+
+Scope, known failures, and measured results: [FSM screening](docs/eval/2026-10-03-pi-qwen-fsm.md), [full Qwen evaluation](docs/eval/2026-10-03-pi-qwen-full.md), and [conversion plan](docs/plans/2026-10-03-pi-finance-state-machine.md).
+
 ## Repository layout
 
 ```text

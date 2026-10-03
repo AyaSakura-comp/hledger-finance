@@ -1,0 +1,9 @@
+{
+  "name": "pi-finance-fsm",
+  "private": true,
+  "type": "module",
+  "pi": {"extensions": ["./index.ts"]},
+  "scripts": {"test": "tsx --test core.test.ts index.test.ts full-eval-support.test.ts", "bench": "tsx bench.ts"},
+  "peerDependencies": {"@earendil-works/pi-coding-agent": "*", "typebox": "*"},
+  "devDependencies": {"tsx": "^4.0.0", "typescript": "^5.0.0"}
+}
