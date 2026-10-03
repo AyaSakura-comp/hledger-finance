@@ -1,6 +1,10 @@
 import { test } from 'node:test';
+import { mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { createFinanceExtension } from './index.ts';
+process.env.PI_FINANCE_STATE_DIR=mkdtempSync(join(tmpdir(),'fin-state-')); // never touch the real pending store
 function harness(backend:any){
  const hooks:any={};const tools:any={};const messages:any[]=[];let active=['read','bash'];
  const pi:any={on:(name:string,fn:any)=>hooks[name]=fn,registerTool:(tool:any)=>tools[tool.name]=tool,getActiveTools:()=>active,setActiveTools:(a:string[])=>active=a,appendEntry:()=>{},sendMessage:(msg:any,options:any)=>messages.push({...msg,options})};

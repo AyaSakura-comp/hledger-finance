@@ -1,6 +1,6 @@
 # Pi finance extension — guarded state machines
 
-**Experimental; not globally installed.** Two layers:
+**Installed globally on this machine (2026-10-04)** via `~/.pi/agent/settings.json` → `packages`; it acts on `~/finance/main.journal` unless `PI_FINANCE_JOURNAL` overrides it. Two layers:
 
 1. **Fast path (`index.ts` + `core.ts`)** — short single expenses such as `【記帳】1500 午餐`, `午餐 150 元`, `YouBike 15 元`. Host parses amount/date/currency; Qwen only picks a category through `finance_finish`.
 2. **Guarded workflows (`managed.ts` + `workflows.ts` + `../scripts/finance_bridge.py`)** — every other finance request. Qwen proposes one structured operation; the host validates it, previews it, and only a **new user message with the exact token** (`確認 <uuid>`) executes a mutation.
@@ -30,6 +30,13 @@ idle -> collecting -> preparing -> awaiting_confirmation -> executing -> done
 - Host-owned facts: source provenance tag, explicit cross-currency sides, a single explicitly named payment account, canonical debit/credit orientation per kind.
 - Mutations bind to a journal/rules snapshot; a stale snapshot, expired token (10 min) or uncertain outcome stops without retry.
 - Readonly results return directly; chart paths are created by the host.
+
+## Gateway integration (piweb / piscord)
+
+- **Envelopes:** gateways send `[optional history]\n[Web user: x]` or `[Discord user: x]` followed by the message (voice under `[Voice message transcription: f]`). The extension only inspects the text after the last user header, so history can't trigger finance mode and wrapped `確認 <token>` still matches. Spoken amounts (`四百六十塊`) become digits before parsing.
+- **Confirmation across processes:** previews are stored at `~/.local/state/pi-finance/<journal-hash>/<token>.json` (0600, override with `PI_FINANCE_STATE_DIR`). A `確認` in any pi process (print mode for attachments, recycled RPC worker) atomically claims the file, so a token executes at most once; execution is still bound to the preview snapshot, and expiry is 10 minutes.
+- **Replies:** previews and receipts are displayed custom messages. pi-agent ≥ this fork emits `input_handled` when an extension consumes a prompt; piweb/piscord finish the turn on it and fall back to displayed custom messages when a turn has no assistant text.
+- **Receipts:** one photo/PDF = one row with the final paid total (line items only on explicit request); the import id is the image content digest, so re-sending the same photo is skipped as a duplicate. Expense accounts must come from the category catalog or the user's own words.
 
 ## Fast-path state machine
 

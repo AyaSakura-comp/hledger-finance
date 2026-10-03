@@ -60,6 +60,13 @@ class PeriodTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "start must not be after end"):
             parse_period("2026-12-01..2026-01-01")
 
+    def test_calendar_month_and_year_periods(self):
+        self.assertEqual(parse_period("2026-10"), (date(2026, 10, 1), date(2026, 11, 1)))
+        self.assertEqual(parse_period("2026-12"), (date(2026, 12, 1), date(2027, 1, 1)))
+        self.assertEqual(parse_period("2025"), (date(2025, 1, 1), date(2026, 1, 1)))
+        with self.assertRaises(ValueError):
+            parse_period("2026-13")
+
     def test_last_month_handles_year_boundary(self):
         self.assertEqual(
             parse_period("last-month", date(2026, 1, 10)),

@@ -3,28 +3,29 @@ import { Type } from 'typebox';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { FinanceFlow, parseExpense, localDate, pythonBackend, requireToolCall, type Backend } from './core.ts';
+import { FinanceFlow, parseExpense, localDate, pythonBackend, requireToolCall, userMessage, type Backend } from './core.ts';
 import { registerManaged } from './managed.ts';
 import type { Bridge } from './workflows.ts';
 
-export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;journal?:string;today?:()=>string}={}):ExtensionFactory {
+export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;journal?:string;today?:()=>string;stateDir?:string}={}):ExtensionFactory {
  return (pi:ExtensionAPI)=>{
   let flow:FinanceFlow|undefined;
   let savedTools:string[]|undefined;
   const journal=options.journal??process.env.PI_FINANCE_JOURNAL??join(homedir(),'finance/main.journal');
   const backend=options.backend??pythonBackend({journal});
-  registerManaged(pi,{journal,bridge:options.bridge,today:options.today,busy:()=>Boolean(flow)});
+  registerManaged(pi,{journal,bridge:options.bridge,today:options.today,busy:()=>Boolean(flow),stateDir:options.stateDir});
   const restore=()=>{if(savedTools){pi.setActiveTools(savedTools);savedTools=undefined;}flow=undefined;};
   const report=(content:string)=>pi.sendMessage({customType:'finance-receipt',content,display:true},{triggerTurn:false});
   pi.on('input',async(event,ctx)=>{
    if(event.source==='extension'||!ctx.isIdle()||event.streamingBehavior==='steer')return;
    if(flow){report('已有記帳流程準備中；本次輸入未寫入，請等待回執後重新提出。');return {action:'handled'};}
    const today=(options.today??localDate)();
-   if(event.images?.length||!parseExpense(event.text,today))return;
+   const text=userMessage(event.text);
+   if(event.images?.length||!parseExpense(text,today))return;
    restore();savedTools=pi.getActiveTools();
    flow=new FinanceFlow(backend,state=>pi.appendEntry('finance-state',{version:1,state}));
    try{
-    await flow.prepare(event.text,today,`pi-${ctx.sessionManager.getSessionId()}-${randomUUID()}`);
+    await flow.prepare(text,today,`pi-${ctx.sessionManager.getSessionId()}-${randomUUID()}`);
     pi.setActiveTools(['finance_finish']);
    }catch(error){report(`記帳準備失敗，未寫入：${String(error)}`);restore();return {action:'handled'};}
   });

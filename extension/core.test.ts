@@ -62,3 +62,20 @@ test('tool call is required only on OpenAI function-tool payloads',async()=>{
  assert.equal(requireToolCall({messages:[]}),undefined);
  assert.equal(requireToolCall({tools:[{name:'x',input_schema:{}}]}),undefined);
 });
+test('gateway envelopes and history are stripped; spoken amounts become digits',async()=>{
+ const {userMessage}=await import('./core.ts');
+ const piweb='[PiWeb cross-harness context]\n{"role":"user","text":"【記帳】1500 午餐"}\nEnd of context.]\n\n[Web user: web]\n確認 4a4912e3-871d-47a4-ae28-d65391509209';
+ assert.equal(userMessage(piweb),'確認 4a4912e3-871d-47a4-ae28-d65391509209');
+ assert.equal(userMessage('[Web user: web]\n今天天氣如何'),'今天天氣如何');
+ assert.equal(userMessage('[Discord user: aya]\n\n[Voice message transcription: voice.ogg]\n剛剛在全聯買東西 花了四百六十塊'),'剛剛在全聯買東西 花了460 元');
+ assert.equal(userMessage('幫我記帳 午餐一百五十元'),'幫我記帳 午餐150 元');
+ assert.equal(userMessage('收到薪水五萬元、十二塊、兩千零五元、一萬兩千三百元'),'收到薪水50000 元、12 元、2005 元、12300 元');
+ assert.equal(userMessage('一百分的考試'),'一百分的考試');
+});
+test('voice filler is trimmed from the fast-path description only',async()=>{
+ const {parseExpense,userMessage}=await import('./core.ts');
+ assert.equal(parseExpense(userMessage('幫我記帳 午餐一百五十元'),'2026-10-04')?.description,'午餐');
+ assert.equal(parseExpense(userMessage('剛剛在全聯買東西 花了四百六十塊'),'2026-10-04')?.description,'在全聯買東西');
+ assert.equal(parseExpense('記一下，咖啡 95 元','2026-10-04')?.amount,'95');
+ assert.equal(parseExpense('花花 50 元','2026-10-04')?.description,'花花');
+});

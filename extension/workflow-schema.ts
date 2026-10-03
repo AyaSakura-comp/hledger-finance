@@ -29,7 +29,7 @@ export function actionSchemaFor(operation?:string){
  const keys=operation?fields[operation]:Object.keys(dataSchema.properties);
  // Qwen XML tool parsers can reject nested optional/union object schemas.
  // Keep the transport flat; Python still validates the structured JSON.
- return Type.Object({operation:StringEnum(operation?[operation]:[...readonlyOperations,...mutationOperations]),data:Type.String({maxLength:200000,description:'JSON object encoded as a string. Allowed fields: '+keys.join(', ')+'. Use transaction kind expense/income/transfer/refund/opening-balance/adjustment; positive amounts as strings. Empty options: "{}". Never supply shell/journal/output/confirm fields.'})},{additionalProperties:false});
+ return Type.Object({operation:StringEnum(operation?[operation]:[...readonlyOperations,...mutationOperations].filter(o=>!['classify','native','settings'].includes(o))),data:Type.String({maxLength:200000,description:'JSON object encoded as a string. Allowed fields: '+keys.join(', ')+'. Use transaction kind expense/income/transfer/refund/opening-balance/adjustment; positive amounts as strings. Empty options: "{}". Never supply shell/journal/output/confirm fields.'})},{additionalProperties:false});
 }
 export const inspectSchema=Type.Object({operation:StringEnum(['classify','native','settings']),data:Type.String({maxLength:45000,description:'JSON object as string. classify: {"description":"merchant"}; native: {"report":"accounts"}; settings: {}. Optional native options must use canonical allowed flag names.'})},{additionalProperties:false});
 export function operationHint(text:string):string|undefined{
@@ -45,6 +45,6 @@ export function operationHint(text:string):string|undefined{
  if(/檢查帳本|hledger check/i.test(text))return 'check';
  if(/統計|stats/i.test(text))return 'stats';
  if(/查詢|明細|餘額|query/i.test(text))return 'query';
- if(/記帳|元|TWD|USD|JPY|收入|退款|轉帳|匯入/i.test(text))return 'ingest';
+ if(/記帳|記這|記一下|收據|發票|元|TWD|USD|JPY|收入|退款|轉帳|匯入/i.test(text))return 'ingest';
  return undefined;
 }

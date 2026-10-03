@@ -38,6 +38,21 @@ Fast path 剩餘失敗：C01、C48 模型仍輸出文字而非工具呼叫（未
 
 ## 未驗證／限制
 
-- 真實 piweb／Discord transport 的確認 token 往返、真實手機收據照片、雲端 rclone remote、語音輸入未測。
+- （2026-10-04 已補測：gateway 確認往返、擬真收據照片、Google Drive 備份、語音，見下節。）仍未測：使用者本人的真實收據照片、piweb 網頁畫面上的實際顯示。
 - 樣本為合成資料，情境固定；不等於任意說法都能正確解讀。
-- 尚未全域啟用；正式帳本未使用。
+- 2026-10-04 起已全域安裝；正式帳本僅做唯讀驗證。
+
+## 2026-10-04 integration tests and install
+
+Real pi (`~/src/pi-agent`) + local Qwen, real gateway prompt formats, disposable journals unless noted.
+
+| Item | Result |
+|---|---|
+| RPC (piweb text path): preview → `確認` | Works after fixes: preview shown via displayed custom message; confirm turn ends on new `input_handled` event (previously piweb would show an empty reply and the confirm turn would hang) |
+| Print mode (attachment path): preview and `確認` in separate processes | Works via persisted authorization; replayed token refused; journal has one transaction |
+| Realistic receipt photo (全聯, 小計480/折扣-20/合計460, rotated, noisy JPEG) | 5/6 previews correct (460, 2026-10-02, groceries, cash), all confirmed cross-process; re-sent same photo skipped as duplicate (1 transaction total). Fixed on the way: invented accounts, `Assets:Cash` casing, `NTD`, model-supplied import ids, total+line-item double counting, parallel inspections |
+| Google Drive backup (`gdrive:` real remote, test folder then purged) | Bytes identical. **Warning: rclone's shared Google client_id is being retired during 2026; create your own client_id or backups will stop** |
+| Voice (edge-tts → Breeze ASR :8025 → Discord envelope) | 3/3 recorded correctly (一百五十元→150, 四百六十塊→460, 五萬元→50000 with preview + confirm) |
+| Non-finance message with finance words in history | Not intercepted |
+| Regression | workflows 34/34 (2 runs), Taiwan fast path 49/50 (C38 category choice), backend 454/454, extension 50/50 |
+| Production journal, read-only stats with the installed package | Correct data, checksum unchanged |

@@ -63,6 +63,11 @@ def parse_period(spec: str, today: date | None = None) -> tuple[date, date]:
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", spec):
         start = date.fromisoformat(spec)
         return start, start + timedelta(days=1)
+    if re.fullmatch(r"\d{4}-\d{2}", spec):
+        start = date.fromisoformat(spec + "-01")
+        return start, add_months(start, 1)
+    if re.fullmatch(r"\d{4}", spec):
+        return date(int(spec), 1, 1), date(int(spec) + 1, 1, 1)
     if spec == "today":
         return today, today + timedelta(days=1)
     if spec == "yesterday":
@@ -103,7 +108,7 @@ def parse_period(spec: str, today: date | None = None) -> tuple[date, date]:
         end = add_months(today.replace(day=1), 1)
         return add_months(end, -count), end
     raise ValueError(
-        "Unknown period. Use START..END, YYYY-MM-DD, today, yesterday, "
+        "Unknown period. Use START..END, YYYY-MM-DD, YYYY-MM, YYYY, today, yesterday, "
         "this/last-week, this/last-month, this/last-quarter, this/last-year, "
         "last-N-days, or last-N-months."
     )
