@@ -264,7 +264,17 @@ def _validate_kind_accounts(kind: str, debit: str, credit: str, label: str) -> N
         ),
     }
     if kind in valid and not valid[kind]:
-        raise ValueError(f"{label} kind {kind} has invalid debit/credit account families")
+        expected = {
+            "expense": "debit expenses:*, credit assets:*/liabilities:*",
+            "income": "debit assets:*/liabilities:*, credit income:*",
+            "refund": "debit assets:*/liabilities:*, credit expenses:*",
+            "transfer": "debit and credit both assets:*/liabilities:*",
+            "adjustment": "one side equity:migration, other assets:*/liabilities:*",
+        }[kind]
+        raise ValueError(
+            f"{label} kind {kind} has invalid debit/credit account families "
+            f"(got debit {debit}, credit {credit}; expected {expected})"
+        )
 
 
 APPROVED_SOURCE_TAGS = {
@@ -4056,7 +4066,11 @@ def _command_delete_locked(args: argparse.Namespace) -> int:
         raise ValueError(result.stderr.strip() or "hledger search failed")
     transactions = json.loads(result.stdout)
     if not transactions:
-        raise ValueError("No transactions matched; nothing was deleted")
+        raise ValueError(
+            "No transactions matched; nothing was deleted. All filters are ANDed; "
+            "description is a case-insensitive regex and where takes raw hledger "
+            "query terms such as desc:Lunch or amt:>100 (not field:~value)"
+        )
     spans = _delete_spans(args.journal, transactions)
     token = _delete_token(args.journal, spans)
     print(f"Delete candidates: {len(spans)}")

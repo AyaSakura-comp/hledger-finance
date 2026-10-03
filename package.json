@@ -2,13 +2,14 @@
   "name": "hledger-finance-pi",
   "version": "0.1.0",
   "private": true,
-  "description": "Experimental single-expense finance FSM for pi; not production-ready",
+  "description": "Experimental guarded finance state machines for pi (fast single expense + previewed workflows); not production-ready",
   "keywords": ["pi-package"],
   "pi": {
     "extensions": ["./extension/index.ts"]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
+    "typebox": "*",
+    "@earendil-works/pi-ai": "*"
   }
 }

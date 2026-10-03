@@ -50,6 +50,11 @@ export class FinanceFlow {
   try{
    const evidence=JSON.parse(await this.backend(['classify','--description',expense.description])) as Evidence;
    if(!Array.isArray(evidence.categories)||!evidence.categories.length||typeof evidence.binding!=='boolean'||!evidence.suggestion)throw new Error('Malformed classification evidence');
+   if(evidence.binding){
+    const account=evidence.suggestion.account;
+    if(typeof account!=='string'||!/^expenses:[^\s\x00-\x1f]+$/.test(account))throw new Error('Invalid binding account');
+    if(!evidence.categories.some(c=>c.account===account))evidence.categories.push({account,description:'Persisted custom binding'});
+   }
    this.evidence=evidence;this.move('ready');return evidence;
   }catch(error){this.move('failed');throw error;}
  }
@@ -83,4 +88,13 @@ export function pythonBackend(options:{journal:string;python?:string;script?:str
   child.on('close',code=>{clearTimeout(timer);if(oversize)fail(new Error('Backend output limit exceeded; outcome uncertain'));else if(code!==0)fail(new Error(`finance.py exit ${code}: ${err||out}`));else ok(args[0]==='ingest-json'?`${out}\n${err}`:out);});
   child.stdin.end(payload===undefined?'':JSON.stringify(payload));
  });
+}
+
+// While a finance state machine owns the turn, plain-text answers are never
+// valid; local models otherwise print pseudo tool calls. Force a real call on
+// OpenAI-compatible payloads (llama.cpp enforces it with a grammar).
+export function requireToolCall(payload:unknown):unknown{
+ const p=payload as any;
+ if(!p||typeof p!=='object'||!Array.isArray(p.tools)||!p.tools.length||p.tools.some((t:any)=>t?.type!=='function'))return undefined;
+ return {...p,tool_choice:'required'};
 }

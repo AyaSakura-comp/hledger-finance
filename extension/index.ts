@@ -3,13 +3,17 @@ import { Type } from 'typebox';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { FinanceFlow, parseExpense, localDate, pythonBackend, type Backend } from './core.ts';
+import { FinanceFlow, parseExpense, localDate, pythonBackend, requireToolCall, type Backend } from './core.ts';
+import { registerManaged } from './managed.ts';
+import type { Bridge } from './workflows.ts';
 
-export function createFinanceExtension(options:{backend?:Backend;journal?:string;today?:()=>string}={}):ExtensionFactory {
+export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;journal?:string;today?:()=>string}={}):ExtensionFactory {
  return (pi:ExtensionAPI)=>{
   let flow:FinanceFlow|undefined;
   let savedTools:string[]|undefined;
-  const backend=options.backend??pythonBackend({journal:options.journal??process.env.PI_FINANCE_JOURNAL??join(homedir(),'finance/main.journal')});
+  const journal=options.journal??process.env.PI_FINANCE_JOURNAL??join(homedir(),'finance/main.journal');
+  const backend=options.backend??pythonBackend({journal});
+  registerManaged(pi,{journal,bridge:options.bridge,today:options.today,busy:()=>Boolean(flow)});
   const restore=()=>{if(savedTools){pi.setActiveTools(savedTools);savedTools=undefined;}flow=undefined;};
   const report=(content:string)=>pi.sendMessage({customType:'finance-receipt',content,display:true},{triggerTurn:false});
   pi.on('input',async(event,ctx)=>{
@@ -28,6 +32,7 @@ export function createFinanceExtension(options:{backend?:Backend;journal?:string
    if(flow?.state!=='ready')return;
    return {systemPrompt:event.systemPrompt+'\nFinance FSM owns this expense. Call finance_finish exactly once, without commentary. Only select an account from provided categories; binding rule wins. Never invent or change amount, date or payment source. Clarify only material uncertainty, not routine category selection. Tool sends the final receipt; do not call other tools or emit a final answer.',message:{customType:'finance-ready',content:JSON.stringify({expense:flow.expense,...flow.evidence}),display:false}};
   });
+  pi.on('before_provider_request',event=>flow?.state==='ready'?requireToolCall(event.payload):undefined);
   pi.on('tool_call',event=>{
    if(flow&&event.toolName!=='finance_finish')return {block:true,reason:'Finance state machine permits only finance_finish for this request',terminate:true};
   });

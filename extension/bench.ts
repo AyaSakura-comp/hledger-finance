@@ -28,7 +28,7 @@ for(let repeat=0;repeat<Number(process.env.BENCH_REPEATS??2);repeat++){
    const backendCalls:any[]=[];
    const wrapped=async(args:string[],payload?:unknown)=>{backendCalls.push({args,payload});return backend(args,payload);};
    const loader=new DefaultResourceLoader({cwd:runDir,agentDir:runDir,
-    extensionFactories:mode==='fsm'?[createFinanceExtension({backend:wrapped})]:[],
+    extensionFactories:mode==='fsm'?[createFinanceExtension({backend:wrapped,journal})]:[],
     extensionsOverride:base=>({...base,extensions:base.extensions.filter(e=>e.path.startsWith('<inline:')),errors:[]}),
     agentsFilesOverride:()=>({agentsFiles:[]}),skillsOverride:()=>({skills:[],diagnostics:[]}),
     systemPromptOverride:()=>`You are a personal-finance assistant. Local date is ${localDate()} (Asia/Taipei). The user gives a completed expense. Record it once and briefly confirm. No unrelated tools.`+(mode==='skill'?'\n'+skill+'\nEVALUATION ADAPTER: hfin/read/bash are unavailable. Skill is already supplied here. Use finance_cli with argument array to call classify, then ingest-json - with payload, then confirm. Journal is fixed by host. Do not include --journal or execute commands.':''),

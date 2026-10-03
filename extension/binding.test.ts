@@ -1,5 +1,5 @@
-// Intentionally red: deterministic regression found by full Qwen evaluation.
-// Keep separate from the passing safety/unit suite until the defect is fixed.
+// Regression found by full Qwen evaluation (fixed): a custom binding account
+// must be selectable even before any historical journal use.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FinanceFlow } from './core.ts';

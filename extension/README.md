@@ -1,12 +1,37 @@
-# Pi finance FSM — short-expense milestone
+# Pi finance extension — guarded state machines
 
-**Experimental; not globally installed; not a complete replacement of SKILL.md.**
+**Experimental; not globally installed.** Two layers:
 
-Supported: `【記帳】1500 午餐`, `午餐 150 元`, `YouBike 15 元`, `威力彩 100 元`; optional leading valid ISO date, 今天/昨天/前天. NFKC full-width amounts supported. Single positive amount with ≤2 decimals; missing currency defaults TWD; missing date is obtained by the host in Asia/Taipei. Receipt exposes defaults; backend owns payment routing. Description is restricted to letters/marks/spaces.
+1. **Fast path (`index.ts` + `core.ts`)** — short single expenses such as `【記帳】1500 午餐`, `午餐 150 元`, `YouBike 15 元`. Host parses amount/date/currency; Qwen only picks a category through `finance_finish`.
+2. **Guarded workflows (`managed.ts` + `workflows.ts` + `../scripts/finance_bridge.py`)** — every other finance request. Qwen proposes one structured operation; the host validates it, previews it, and only a **new user message with the exact token** (`確認 <uuid>`) executes a mutation.
 
-Unsupported inputs (questions, estimates, examples, transfers, income, installments, foreign currency, explicit payment source, multiple expenses, numeric item names and images) **fall through to the existing agent**. This extension is not a sandbox for unsupported conversations. Be especially careful with reports/deletion/import until their FSMs are implemented. `/finance` with a space is a parser prefix, not a registered interactive slash command; prefer `【記帳】`.
+| Area | Operations |
+|---|---|
+| Recording | batch rows, income, transfer, refund, opening balance, foreign currency, cross-currency transfer, explicit payment account |
+| Sources | CSV/TSV/JSON/text, PDF text (`pdftotext`), receipt images (image-capable model only) — explicit user paths only, treated as untrusted data |
+| Schedules | installments, loan schedules (all terms required, never guessed) |
+| Migration | historical import with independent `controls` (count + kind:currency totals), isolated trial ingest and strict audit before preview |
+| Read-only | query/register/balance reports, stats, native hledger reports, per-currency dashboard PNGs, check/audit/classify/settings |
+| Changes | delete (complete candidate preview; partial confirmation never executes), undo, classification/payment rules, backup to a configured rclone remote |
 
-## State machine
+Measured with local Qwen (`../docs/eval/2026-10-03-pi-qwen-workflows.md`): 17 workflow scenarios × 4 runs **68/68**; 50 Taiwan short expenses **47/50**.
+
+## Guarded workflow state machine
+
+```
+idle -> collecting -> preparing -> awaiting_confirmation -> executing -> done
+            |  ^          |                 |                    |
+            v  |          v                 v                    v
+       clarifying   failed (repairable ≤2) cancelled           failed (no retry)
+```
+
+- Only `finance_inspect`, `finance_source`, `finance_action`, `finance_question` are active; other tools are blocked. Provider requests carry `tool_choice: "required"` while collecting.
+- No model-supplied shell/argv, journal path, output path or confirmation field. Money is decimal strings; safe integers are converted losslessly.
+- Host-owned facts: source provenance tag, explicit cross-currency sides, a single explicitly named payment account, canonical debit/credit orientation per kind.
+- Mutations bind to a journal/rules snapshot; a stale snapshot, expired token (10 min) or uncertain outcome stops without retry.
+- Readonly results return directly; chart paths are created by the host.
+
+## Fast-path state machine
 
 ```
 IDLE -> PREPARING -> READY -> WRITING -> DONE
@@ -23,7 +48,7 @@ Each input creates an import ID, shared by all executions within that flow. Seco
 
 ## 在 Pi 安裝（實驗版，先用測試帳本）
 
-此 extension **只處理單筆簡短支出**，不是整套記帳 skill 的替代品。完整評估未通過正式部署驗收；自訂 binding 的未使用子帳戶有已知 `Invalid category` 缺陷。報表、刪除、匯入等不支援的輸入會回到原 agent，並不受此 FSM 保護。請勿直接對正式帳本啟用。
+此 extension 涵蓋單筆快速記帳與上表 guarded workflows；完整評估見 `docs/eval/2026-10-03-pi-qwen-workflows.md`。尚未驗證真實 piweb／Discord 確認往返、真實收據照片與雲端備份 remote，請先用測試帳本。需要 `pdftotext`（poppler-utils）才能讀 PDF；收據圖片需要支援影像輸入的模型。
 
 需求：已安裝 pi、Python 3.11+、Git、hledger 1.32+。不必另裝 `hfin` 指令；extension 使用同一份 repository 的 `scripts/finance.py`，**不能只複製 `index.ts` 或 `extension/` 資料夾**。
 
@@ -37,7 +62,7 @@ PI_FINANCE_JOURNAL=/absolute/path/to/disposable/main.journal \
   pi -e "$HOME/src/hledger-finance/extension/index.ts"
 ```
 
-輸入 `午餐 150 元` 測試。核對 receipt 與測試帳本的日期、金額及科目；無寫入訊息不等於已記帳。結束此 pi 程序即停止一次性載入。
+輸入 `午餐 150 元` 測試快速路徑；輸入 `【財務】查詢所有帳戶餘額` 測試 guarded workflow，寫入類操作會先顯示預覽與 `確認 <token>`。核對 receipt 與測試帳本的日期、金額及科目；無寫入訊息不等於已記帳。結束此 pi 程序即停止一次性載入。
 
 ### 2. 可選：Pi package 安裝
 
@@ -88,10 +113,6 @@ npm test # core, extension hooks, and evaluation-support tests
 
 ## Publication verification
 
-Before publishing this experimental milestone: backend suite **445/445**, extension/core/evaluation-support suite **17/17**, and TypeScript NodeNext check passed. `known-defects.test.ts` remains a separate **expected failing** custom-binding regression, not part of the green suite. The raw Qwen screening/full-evaluation evidence was retained unchanged; it predates the pre-commit English-intent and CLI-option hardening and was not rerun as a full model matrix.
+Backend suite **453/453**, extension suite **42/42**, TypeScript NodeNext check passed. Full local-Qwen evidence: `../docs/eval/2026-10-03-pi-qwen-workflows.md` and `-evidence.json` (`workflow-eval.ts`, `full-eval.ts EVAL_FILTER=^C`).
 
-Pre-commit review prompted two fixes: reject English example/budget/hypothetical and selected non-expense keywords; reject noncanonical helper options so argparse abbreviations cannot bypass evaluation output/backup checks. Parser exclusions remain heuristic, **not a general intent classifier**. A new unknown wording may still require explicit user caution; unsupported fallback remains outside this FSM's protection.
-
-## Remaining whole-skill conversion
-
-See `../docs/plans/2026-10-03-pi-finance-state-machine.md`: income/refund/transfer/batch, image ingestion, queries/stats/visualizations, loan/installments, destructive confirmation tokens, undo/backups and custom rules still use the original skill. Persistent guarded clarification, transport replay IDs, external UI receipt delivery and broader Taiwan regression coverage are also pending.
+Parser exclusions remain heuristic, **not a general intent classifier**. Remaining unverified: real piweb/Discord confirmation round-trip, real phone receipt photos, cloud rclone remotes, voice input.

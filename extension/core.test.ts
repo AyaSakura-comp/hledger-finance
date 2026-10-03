@@ -55,3 +55,10 @@ test('real CLI uses isolated journal, preserves routing and creates one commit; 
  const again=new FinanceFlow(backend); await again.prepare('午餐1500元','2026-10-03','real-test'); const msg=await again.commit('expenses:food:dining');
  assert.ok(msg.includes('重複')); assert.equal(await readFile(journal,'utf8'),text); await backend(['check']);
 });
+
+test('tool call is required only on OpenAI function-tool payloads',async()=>{
+ const {requireToolCall}=await import('./core.ts');
+ assert.equal((requireToolCall({messages:[],tools:[{type:'function',function:{name:'x'}}]}) as any).tool_choice,'required');
+ assert.equal(requireToolCall({messages:[]}),undefined);
+ assert.equal(requireToolCall({tools:[{name:'x',input_schema:{}}]}),undefined);
+});

@@ -1,0 +1,109 @@
+{
+ "model": "local-llama/qwen3.6-35b-q4 via pi SDK, thinking off; qwen-mtp with llama.cpp seq_rm fix 3b5f5e9ff",
+ "date": "2026-10-03",
+ "runs": 4,
+ "workflow_cases": {
+  "receipt-image": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 5.41
+  },
+  "receipt-pdf": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 4.72
+  },
+  "batch": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 6.48
+  },
+  "income": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 2.84
+  },
+  "exchange": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 3.93
+  },
+  "foreign": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 2.66
+  },
+  "refund-opening": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 3.43
+  },
+  "installment": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 2.79
+  },
+  "loan": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 3.92
+  },
+  "historical-csv": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 10.32
+  },
+  "query-balance": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 1.61
+  },
+  "undo": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 1.58
+  },
+  "stats": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 5.61
+  },
+  "chart": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 6.79
+  },
+  "delete-subset": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 1.63
+  },
+  "rules": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 2.81
+  },
+  "backup": {
+   "pass": 4,
+   "of": 4,
+   "median_s": 2.84
+  }
+ },
+ "fast_path_taiwan50": {
+  "pass": 47,
+  "of": 50,
+  "median_s": 3.18,
+  "failures": {
+   "C01": [
+    "Transaction count 0, expected 1"
+   ],
+   "C19": [
+    "Missing expected {\"date\":\"2026-10-03\",\"amount\":\"499\",\"account\":[\"expenses:transport:driving\",\"expenses:transport:vehicle\",\"expenses:transport:fuel\",\"expenses:subscriptions\"],\"currency\":\"TWD\"}"
+   ],
+   "C48": [
+    "Transaction count 0, expected 1"
+   ]
+  }
+ },
+ "productionJournalUnchanged": true
+}
