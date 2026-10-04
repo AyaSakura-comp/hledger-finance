@@ -76,3 +76,17 @@ test('everyday finance phrasing is detected; ordinary chat is not',async()=>{
  for(const t of ['這個月花了多少錢？','我的現金還剩多少','午餐 120、飲料 50','剛剛搭計程車花了 230','最近支出狀況','上個月消費'])assert.ok(financeIntent(t),t);
  for(const t of ['今天台北天氣如何','花了多少時間寫完','畫一下貓的圖','把剛剛那段程式刪掉','iPhone 16 和 17 差在哪'])assert.equal(financeIntent(t),false,t);
 });
+test('attachment notes, quotes and talk about the tooling never trigger finance mode',async()=>{
+ const {financeIntent,intentText}=await import('./managed.ts');
+ const video='前端 debug: 點開 thinking 關閉他會位移\n[Binary attachment: /x/media/ScreenRecording_10-04-2026_12-20-22_1.mp4]\nDo not use the read tool on this binary file; it only supports text and images and will corrupt the model context.';
+ assert.equal(intentText(video),'前端 debug: 點開 thinking 關閉他會位移');
+ for(const t of [video,'Go to 記帳 project , check current status','前面記帳的部分為什麼他要跑這麼多回合？','這張顯卡 5000 元值得買嗎','<quoted_selection>\nQwen3-Omni 30B\n</quoted_selection>\n\n這模型多大','統計一下這個 repo 的程式碼行數'])assert.equal(financeIntent(t),false,t.slice(0,30));
+ for(const t of ['信用卡分期 12 期','這禮拜我花多少錢','【記帳】68元貓罐頭','今天的花費'])assert.ok(financeIntent(t),t);
+});
+test('routine questions are recognised; material ones are not',async()=>{
+ const {isRoutineQuestion}=await import('./managed.ts');
+ assert.ok(isRoutineQuestion('日期是今天嗎？幣別是台幣？用現金還是信用卡？'));
+ assert.ok(isRoutineQuestion('午餐要歸類為 expenses:food:dining 嗎？'));
+ assert.equal(isRoutineQuestion('收據金額看不清楚，總額是多少錢？'),false);
+ assert.equal(isRoutineQuestion('這筆貸款的年利率是多少？'),false);
+});

@@ -64,3 +64,11 @@ Original skill unregistered. Real pi + Qwen, normal settings, `[Web user: web]` 
 First run without the skill exposed: unrecognized phrasing went to the plain model, which **deleted an entry by editing the journal file directly (no preview)**, read the journal itself, drew its own chart, and silently failed to record `午餐 120、飲料 50`. Fixed with a ledger write guard, a `finance_handoff` tool, hidden workflow-only tools, broader/follow-up detection, `amend`, `kind:` query mapping (previously a silent 0 result), readable stats, argparse errors returned instead of crashing the bridge, host-owned text import ids (the model had copied an id from history, making an amend delete without adding) and no-token previews when nothing would be written.
 
 Final: 12/12 messages correct in two consecutive runs; final ledger exact (lunch 120, drink 50, breakfast amended 65→80, taxi deleted); chart values correct; weather question not intercepted; production journal unchanged. Known chart issue (pre-existing): category colours differ between the donut and the ranking bars.
+
+## 2026-10-04 false-trigger fix
+
+User report: a frontend bug report with a video attachment was captured by the finance workflow (the model could only call finance_question). Cause: the old "multi-line + digit" rule matched piweb's attachment note and the date in the file name; other broad terms (查詢/統計/匯入/備份/transfer/transaction/記帳 itself) matched ordinary chat.
+
+Measured on the user's real piweb history (1,745 unique messages): **294 flagged before → 14 after, all 14 genuine finance**. Detection now ignores attachment notes and quotes, excludes talk about the tooling, needs money semantics; follow-ups must point at an entry. `finance_release` lets a wrongly captured message continue normally; the first purely routine question (date/currency/payment/category) is refused so the model proposes with defaults; item lists route to ingest.
+
+Qwen: two conversation runs 7/7 each (preview → confirm, release of a non-ledger 「收入證明」 question, stats, amend 120→130, fast path), workflows 17/17. Test hygiene: an earlier real-model test sent the video bug report to an agent with full tools and it edited an untracked piweb artifact file; the three edits were reverted exactly and later tests run with built-in tools disabled.

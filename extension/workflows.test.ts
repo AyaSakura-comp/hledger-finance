@@ -224,7 +224,7 @@ test('operation hints do not trip on words inside ordinary requests',async()=>{
  assert.equal(operationHint('期初現金1000元，debit assets:cash、credit equity:opening-balances。'),'ingest');
  assert.equal(operationHint('把整份測試帳本含Git歷史及規則備份到qa:'),'backup');
  assert.equal(operationHint('新增未來分類規則：「毛孩市集」一律expenses:pets:supplies。'),'rules');
- assert.equal(operationHint('早餐那筆金額改成 80'),'amend');
+ assert.equal(operationHint('早餐那筆金額改成 80'),'amend');assert.equal(operationHint('午餐 120、飲料 50'),'ingest');assert.equal(operationHint('剛剛搭計程車花了 230'),'ingest');
 });
 test('explicit debit/credit pairs from the user must appear in the proposal',async()=>{
  const w=W(async()=>preview,()=>'2026-10-04');w.begin('午餐退款20元，debit assets:cash、credit expenses:food:dining');

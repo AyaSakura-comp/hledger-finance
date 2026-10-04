@@ -51,6 +51,8 @@ export function operationHint(text:string):string|undefined{
  if(/餘額|還剩|剩多少|存款|帳上/.test(text))return 'query';
  if(/統計|stats|花了多少|花多少|多少錢|支出多少|收支|開銷|花費|消費多少/i.test(text))return 'stats';
  if(/查詢|明細|query/i.test(text))return 'query';
- if(/記帳|記這|記一下|收據|發票|元|TWD|USD|JPY|收入|退款|轉帳|匯入/i.test(text))return 'ingest';
+ if(/記帳|記這|記一下|收據|發票|元|塊|TWD|USD|JPY|收入|退款|轉帳|匯入/i.test(text))return 'ingest';
+ // "午餐 120、飲料 50" / "花了 230": items with amounts are something to record.
+ if((text.match(/[\p{L}]{1,12}\s*\d+(?:\.\d{1,2})?(?=\s*(?:[、，,；;\n]|$))/gu)?.length??0)>=1||/(?:花了|付了|繳了)\s*\d/.test(text))return 'ingest';
  return undefined;
 }
