@@ -14,7 +14,7 @@ export type Receipt={text:string;state:WorkflowState};
 export class Workflow {
  state:WorkflowState='idle';
  private pending?:{request:Request;reply:Reply;token:string;expires:number};
- private inspecting=0;private repairable=false;private input='';private id='';private source:'text'|'image'|'file'|'pdf'='text';
+ private inspecting=0;session='';autoCommit=false;private repairable=false;private input='';private id='';private source:'text'|'image'|'file'|'pdf'='text';
  constructor(private bridge:Bridge,private today:()=>string=localDate,private clock:()=>number=Date.now,private store?:PendingStore,private journal=''){}
  get confirmation(){return this.pending?.token;}
  begin(input:string,source:'text'|'image'|'file'|'pdf'='text',stableSourceDigest?:string){
@@ -149,18 +149,30 @@ export class Workflow {
     this.state='done';return {text:'沒有新增：這些紀錄與帳本既有紀錄重複，未寫入。\n'+this.boundOutput(reply),state:this.state};
    }
    if(!reply.snapshot)throw new Error('No preview snapshot; authorization refused');
+   // Plain typed expenses/income are as low-risk as the fast path: write now,
+   // with undo available. Deletes, amends, receipts, imports, rules, backups,
+   // installments and loans still require a confirmation.
+   if(this.autoCommit&&request.operation==='ingest'&&this.source==='text'&&request.data.transactions.length<=10&&request.data.transactions.every((r:any)=>['expense','income'].includes(r.kind??request.data.defaults?.kind))){
+    this.state='executing';
+    try{const output=await this.bridge(request,{mode:'execute',expected_snapshot:reply.snapshot,signal});this.state=output.code===0?'done':'failed';
+     return {text:output.code===0?doneText(request,output,reply):'未確認成功；已停止，請先查帳，不要自動重試：\n'+this.boundOutput(output),state:this.state};}
+    catch(error){this.state='failed';return {text:`結果不確定，已停止且不自動重試：${String(error)}`,state:this.state};}
+   }
    if(['delete','amend'].includes(request.operation)&&!reply.delete_token)throw new Error('No backend deletion token');
    const token=randomUUID();this.pending={request,reply:structuredClone(reply),token,expires:this.clock()+600000};this.state='awaiting_confirmation';
    // Full candidate preview is mandatory. Do not offer confirmation for a
    // truncated preview: narrow the batch/filter instead.
-   const preview=(['ingest','amend'].includes(request.operation)?summarizeRows(request):JSON.stringify(request,null,2))+'\n'+reply.stdout+'\n'+reply.stderr;
+   const preview=['ingest','amend'].includes(request.operation)?(request.operation==='amend'?amendHeader(reply.stdout)+'\n':'')+postingLines(reply.stdout.split(/\nADD:\n/).pop()??'',request):request.operation==='delete'?reply.stdout.replace(/^Confirmation token:.*$/gm,'').trim():JSON.stringify(request,null,2)+'\n'+reply.stdout+'\n'+reply.stderr;
    if(Buffer.byteLength(preview)>45000||preview.split('\n').length>1800)throw new Error('Preview too large to show completely; narrow scope');
-   this.store?.save({token,request,reply:structuredClone(reply),expires:this.pending.expires,journal:this.journal});
-   return {text:`尚未修改帳本／規則／備份。請核對完整 ${({ingest:'記帳',amend:'修改',delete:'刪除',undo:'復原',rules:'規則',backup:'備份',installment:'分期',loan:'貸款',historical:'歷史匯入'} as Record<string,string>)[request.operation]??request.operation} 預覽（包含所有候選）。\n${preview}\n\n僅完整同意以上範圍時，在下一則訊息輸入：確認 ${token}\n只同意部分內容請取消後重新提出；取消：取消記帳。授權有效 10 分鐘。`,state:this.state};
+   this.store?.save({token,request,reply:structuredClone(reply),expires:this.pending.expires,journal:this.journal,session:this.session||undefined});
+   return {text:`請確認以下${({ingest:'記帳',amend:'修改',delete:'刪除',undo:'復原',rules:'規則變更',backup:'備份',installment:'分期',loan:'貸款排程',historical:'歷史匯入'} as Record<string,string>)[request.operation]??request.operation}（尚未寫入）：\n${preview}\n\n回覆「確認」執行；回覆「取消」放棄。10 分鐘內有效。`,state:this.state};
   }catch(error){this.pending=undefined;this.repairable=!signal?.aborted;this.state='failed';throw error;}
  }
  async confirm(text:string,signal?:AbortSignal):Promise<Receipt|null>{
-  const token=/^(?:確認|confirm) ([0-9a-f-]{36})$/.exec(text.trim())?.[1];
+  const t=text.trim();
+  let token=/^(?:確認|confirm) ([0-9a-f-]{36})$/i.exec(t)?.[1];
+  // A bare "確認/好/ok" means the preview shown right before it in this conversation.
+  if(!token&&isShortConfirm(t))token=this.state==='awaiting_confirmation'&&this.pending?this.pending.token:this.session?this.store?.latest(this.session):undefined;
   if(['preparing','executing'].includes(this.state))return null;
   let authorized:{request:Request;reply:Reply;expires:number}|undefined;
   if(this.state==='awaiting_confirmation'&&this.pending){
@@ -181,7 +193,7 @@ export class Workflow {
   try{
    const output=await this.bridge(request,{mode:'execute',expected_snapshot:reply.snapshot,delete_token:reply.delete_token,signal});
    this.state=output.code===0?'done':'failed';
-   return {text:(output.code===0?'操作完成：':'未確認成功；已停止，請先查帳，不要自動重試：')+'\n'+this.boundOutput(output),state:this.state};
+   return {text:output.code===0?doneText(request,output):'未確認成功；已停止，請先查帳，不要自動重試：\n'+this.boundOutput(output),state:this.state};
   }catch(error){this.state='failed';return {text:`結果不確定，已停止且不自動重試：${String(error)}`,state:this.state};}
  }
  // Expense categories come from the user's catalog (standard, custom rules,
@@ -294,4 +306,20 @@ export function summarizeRows(request:Request):string{
  const rows=(request.data.transactions??[]).map((r:any,i:number)=>{const x={...d,...r};return `${i+1}. ${x.date??''} ${x.description??''} ${x.amount??''} ${x.currency??''}｜${kinds[x.kind]??x.kind??''}｜借 ${x.debit??'（依規則）'}｜貸 ${x.credit??'（依付款規則）'}${x.debit_amount?`｜收到 ${x.debit_amount} ${x.debit_currency??''}`:''}`;});
  const filter=request.operation==='amend'?`將移除符合 ${JSON.stringify(request.data.filter)} 的一筆，並寫入：\n`:'將寫入：\n';
  return filter+rows.join('\n');
+}
+
+export function isShortConfirm(t:string):boolean{return /^(?:確認|確定|好|好的|ok|okay|yes|y|對|是|沒問題|執行|confirm)[!！。.\s]*$/i.test(t.trim());}
+// Compact postings from backend journal text: "日期 描述 金額｜借方｜貸方".
+export function postingLines(stdout:string,request?:Request):string{
+ const out:string[]=[];let head='';let posts:string[]=[];
+ const flush=()=>{if(head&&posts.length){const debit=posts.find(p=>!/\s-\d/.test(p))??posts[0];const credit=posts.find(p=>p!==debit)??'';const [da,...dv]=debit.trim().split(/\s{2,}/);const [ca]=credit.trim().split(/\s{2,}/);out.push(`・${head} ${dv.join(' ')}｜${da}｜${ca??''}`);}head='';posts=[];};
+ for(const l of stdout.split('\n')){const h=/^(\d{4}-\d{2}-\d{2}) (.+?)(?: \[\d+\/\d+\])?$/.exec(l);if(h){flush();head=`${h[1]} ${h[2]}`;continue;}if(/^\s{4}[a-z][\w:.-]*\s{2,}-?\d/.test(l))posts.push(l);}
+ flush();
+ return out.length?out.join('\n'):(request?summarizeRows(request):stdout.trim());
+}
+function amendHeader(stdout:string):string{const m=/REMOVE:\n[\s\S]*?\[1\] ([^\n]+)\n\s+([^\n]+)/.exec(stdout);return m?`移除：${m[1].replace(/ \[\d+\/\d+\].*$/,'')}（${m[2].trim()}）\n改為：`:'';}
+function doneText(request:Request,output:Reply,preview?:Reply):string{
+ if(['ingest','amend'].includes(request.operation)){const n=request.data.transactions?.length??0;const lines=postingLines((preview?.stdout??'')+'\n'+output.stdout,request);return `${request.operation==='amend'?'已修改':'已記帳 '+n+' 筆'}：\n${lines}\n要撤銷請說「撤銷」。`;}
+ if(request.operation==='delete')return '已刪除。要復原請說「撤銷」。';
+ return '操作完成。\n'+(output.stdout+'\n'+output.stderr).trim().slice(0,3000);
 }

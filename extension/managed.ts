@@ -4,8 +4,8 @@ import { readFile, stat, realpath } from 'node:fs/promises';
 import { resolve, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { parseExpense, localDate, requireToolCall, userMessage } from './core.ts';
-import { Workflow, pythonBridge, sourceDigest, parseData, readonlyOperations, mutationOperations, type Bridge, type Request } from './workflows.ts';
+import { parseEntries, localDate, requireToolCall, userMessage } from './core.ts';
+import { Workflow, pythonBridge, sourceDigest, parseData, readonlyOperations, mutationOperations, isShortConfirm, type Bridge, type Request } from './workflows.ts';
 import { fileStore } from './pending-store.ts';
 import { actionSchemaFor, inspectSchema, operationHint } from './workflow-schema.ts';
 
@@ -93,23 +93,29 @@ export function registerManaged(pi:ExtensionAPI,options:{journal:string;bridge?:
   if(['preparing','executing'].includes(w.state)){report('財務流程執行中，本次輸入未操作。');return {action:'handled'};}
   const text=userMessage(event.text);
   last={text,images:event.images,cwd:ctx.cwd};
-  if(w.state!=='awaiting_confirmation'&&/^(?:確認|confirm) [0-9a-f-]{36}$/.test(text.trim())){
+  const session=ctx.sessionManager?.getSessionId?.()??'';w.session=session;w.autoCommit=true;
+  const tokenForm=/^(?:確認|confirm) [0-9a-f-]{36}$/i.test(text.trim()),shortForm=isShortConfirm(text);
+  // "確認" only ever refers to the preview right before it: any other message
+  // retires this conversation's pending previews (here and in other processes).
+  if(!tokenForm&&!shortForm&&!/^取消(?:記帳)?$/.test(text.trim())&&session&&w.state!=='awaiting_confirmation')store.dropSession(session);
+  if(w.state!=='awaiting_confirmation'&&(tokenForm||(shortForm&&session&&store.latest(session)))){
    const receipt=await w.confirm(text);
-   report(receipt?receipt.text:'未執行：找不到有效的預覽授權（可能已使用、已取消或已過期）。請重新提出。');return {action:'handled'};
+   report(receipt?receipt.text:'未執行：找不到有效的預覽（可能已使用、已取消或已過期）。請重新提出。');return {action:'handled'};
   }
+  if(w.state!=='awaiting_confirmation'&&/^取消(?:記帳)?$/.test(text.trim())&&session&&store.latest(session)){store.dropSession(session);report('已取消，沒有寫入。');return {action:'handled'};}
   if(w.state==='awaiting_confirmation'){
-   if(text.trim()==='取消記帳'){w.cancel();report('已取消；未執行預覽操作。');return {action:'handled'};}
+   if(/^取消(?:記帳)?$/.test(text.trim())){w.cancel();report('已取消，沒有寫入。');return {action:'handled'};}
    const receipt=await w.confirm(text);
    if(receipt){report(receipt.text);return {action:'handled'};}
-   if(/^(?:確認|confirm)\b|^確認|^只|^僅/.test(text.trim())){report('未執行：授權必須完整符合目前預覽的「確認 TOKEN」；若只同意部分，請取消並重新搜尋。');return {action:'handled'};}
-   if(w.state==='awaiting_confirmation')w.cancel();
+   if(/^(?:確認|confirm)\b|^確認|^只|^僅/.test(text.trim())){report('未執行：只能整批確認。若只同意部分，請回覆「取消」後重新說明要的範圍。');return {action:'handled'};}
+   if(w.state==='awaiting_confirmation'){w.cancel();if(session)store.dropSession(session);}
   }
   const contextual=w.state==='clarifying';
   // Follow-ups must point at an entry, not just say 剛剛/刪掉 (that is also
   // how people talk about code or messages).
   const followUp=Date.now()-(options.recent?.at??0)<15*60000&&/那筆|這筆|上一筆|剛剛記的|剛記的|剛才記的|(?:改成|改為)\s*\d/.test(intentText(text));
   if(!contextual&&!followUp&&!financeIntent(text))return;
-  if(!contextual&&!event.images?.length&&parseExpense(text,today()))return; // host-owned fast path
+  if(!contextual&&!event.images?.length&&parseEntries(text,today()))return; // host-owned fast path
   if(event.images?.length&&!ctx.model?.input.includes('image')){report('目前模型無法讀取收據圖片；未寫入。請切換支援圖片的模型或提供可讀文字。');return {action:'handled'};}
   start(text,event.images,ctx.cwd,contextual);
  });

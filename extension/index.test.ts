@@ -31,6 +31,7 @@ test('aborted tool never writes; plain-text model reply gets a no-write notice',
  const controller=new AbortController();controller.abort();
  await h.tools.finance_finish.execute('call',{category:'expenses:food:dining'},controller.signal,undefined,h.ctx);
  assert.equal(writes,0);
+ h.hooks.agent_settled({},h.ctx);assert.ok(h.messages.some(m=>m.customType==='finance-fast-nudge'&&m.options?.triggerTurn!==false)); // one automatic retry
  h.hooks.agent_settled({},h.ctx);assert.ok(h.messages.some(m=>m.content.includes('未寫入')));
 });
 test('prepare errors are handled without falling back to unguarded model',async()=>{

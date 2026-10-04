@@ -63,7 +63,7 @@ for(const c of cases.filter(c=>!process.env.WORKFLOW_CASES||process.env.WORKFLOW
   await new Promise(r=>setTimeout(r,200));await session.waitForIdle();
   const custom=session.messages.filter((m:any)=>m.role==='custom'&&m.customType==='finance-workflow-receipt');
   const text=custom.map((m:any)=>typeof m.content==='string'?m.content:'').join('\n');
-  const token=text.match(/確認 ([a-f0-9-]{36})/i)?.[1];
+  const token=text.match(/確認 ([a-f0-9-]{36})/i)?.[1]??(/回覆「確認」/.test(text)?'short':undefined);
   const proposed=[...calls].reverse().find(x=>x.mode==='preview'&&x.request.operation===c.operation);
   if(!proposed)throw new Error('Missing actual requested-operation preview/tool call');
   if(proposed.reply.code!==0&&!(c.operation==='delete'&&proposed.reply.code===3))throw new Error('Backend preview failed: '+proposed.reply.stderr);
@@ -71,7 +71,8 @@ for(const c of cases.filter(c=>!process.env.WORKFLOW_CASES||process.env.WORKFLOW
    // Row order is not a fact; match each expected row to a distinct proposed row.
    for(let i=0;i<c.rows.length;i++){const want={date:today,currency:'TWD',...c.rows[i]};const at=unused.findIndex((a:any)=>Object.entries(want).every(([k,v])=>norm(k,a[k])===v));if(at<0)throw new Error(`Wrong proposed immutable facts for expected row ${i}: ${JSON.stringify(want)} not in ${JSON.stringify(rows)}`);unused.splice(at,1);}}
   if(c.partial){const old=await readFile(journal,'utf8');await session.prompt('只確認刪除Lunch800元，Lunch refund不要刪');if(await readFile(journal,'utf8')!==old)throw new Error('Partial confirmation changed journal');if(calls.some(x=>x.mode==='execute'))throw new Error('Partial confirmation executed deletion');}
-  else if(token){await session.prompt('確認 '+token);const executed=[...calls].reverse().find(x=>x.mode==='execute');if(!executed||executed.reply.code!==0)throw new Error('Host confirmation did not successfully execute');}
+  else if(!token&&calls.some(x=>x.mode==='execute'&&x.reply.code===0)){} // plain typed records are written at once
+  else if(token){await session.prompt('確認');const executed=[...calls].reverse().find(x=>x.mode==='execute');if(!executed||executed.reply.code!==0)throw new Error('Host confirmation did not successfully execute');}
   else if(!['stats','visualize','query','native','settings','audit','check'].includes(c.operation!))throw new Error('Missing host authorization preview token');
   if(c.contains&&!proposed.reply.stdout.includes(c.contains))throw new Error('Missing expected report value '+c.contains);
   if(c.id==='undo'&&(await readFile(journal,'utf8')).includes('Lunch'))throw new Error('Undo did not remove last action');

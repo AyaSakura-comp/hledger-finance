@@ -15,18 +15,29 @@ function harness(bridge:any){
  const emit=async(n:string,e:any)=>{for(const f of hooks.get(n)??[]){const r=await f(e,ctx);if(r?.action==='handled'||r?.block)return r;}};
  return {emit,tools,messages,ctx,active:()=>active};
 }
-test('income/batch route is guarded, preview waits, only next exact user token writes',async()=>{
- const calls:any[]=[];const h=harness(async(r:any,o:any)=>{calls.push({r,o});return {code:0,stdout:o.mode==='preview'?'Salary 50000':'written',stderr:'',snapshot:'a'};});
+test('typed income is written at once; a delete waits for a plain 確認 and runs once',async()=>{
+ const calls:any[]=[];const h=harness(async(r:any,o:any)=>{calls.push({r,o});if(r.operation==='delete')return {code:o.mode==='preview'?3:0,stdout:o.mode==='preview'?'Delete candidates: 1\n[1] 2026-10-03 Salary [1/1]\n    assets:bank=50000 TWD\nConfirmation token: 0123456789abcdef':'deleted',stderr:'',snapshot:'a',delete_token:'0123456789abcdef'};return {code:0,stdout:o.mode==='preview'?'2026-10-03 Salary\n    assets:bank         50000 TWD\n    income:salary      -50000 TWD':'written',stderr:'',snapshot:'a'};});
  await h.emit('input',{text:'收到薪水50000元，存assets:bank',source:'interactive'});
- assert.ok(h.tools.finance_action);assert.ok(h.active().includes('finance_action'));
  assert.equal((await h.emit('tool_call',{toolName:'bash'})).block,true);
  await h.tools.finance_action.execute('1',{operation:'ingest',data:{transactions:[{kind:'income',description:'Salary',amount:'50000',debit:'assets:bank',credit:'income:salary'}]}});
- await h.emit('agent_settled',{});assert.deepEqual(h.active(),['bash','read']);assert.equal(calls.length,1);
- const text=h.messages.at(-1).content;const token=text.match(/確認 ([a-f0-9-]{36})/)[1];
- await h.emit('input',{text:'只確認部分',source:'interactive'});assert.equal(calls.length,1);
- await h.emit('input',{text:'確認 '+token,source:'interactive'});assert.equal(calls.length,2);assert.equal(calls[1].o.mode,'execute');
- await h.emit('input',{text:'確認 '+token,source:'interactive'});assert.equal(calls.length,2);
+ assert.deepEqual(calls.map(c=>c.o.mode),['preview','execute']);assert.match(h.messages.at(-1).content,/已記帳 1 筆[\s\S]*撤銷/);
+ await h.emit('agent_settled',{});assert.deepEqual(h.active(),['bash','read']);
+ await h.emit('input',{text:'把 Salary 那筆刪掉',source:'interactive'});
+ await h.tools.finance_action.execute('2',{operation:'delete',data:{description:['Salary']}});
+ assert.match(h.messages.at(-1).content,/請確認以下刪除（尚未寫入）[\s\S]*回覆「確認」/);assert.doesNotMatch(h.messages.at(-1).content,/Confirmation token/);
+ await h.emit('agent_settled',{});const n=calls.length;
+ await h.emit('input',{text:'只確認部分',source:'interactive'});assert.equal(calls.length,n);
+ await h.emit('input',{text:'確認',source:'interactive'});assert.equal(calls.length,n+1);assert.equal(calls.at(-1).o.mode,'execute');
+ await h.emit('input',{text:'確認',source:'interactive'});assert.equal(calls.length,n+1);
  assert.ok(h.messages.every((m:any)=>m.options.triggerTurn===false));
+});
+test('an unrelated message retires the pending preview, so a later 好 cannot run it',async()=>{
+ const calls:any[]=[];const h=harness(async(r:any,o:any)=>{calls.push(o.mode);return {code:3,stdout:'Delete candidates: 1',stderr:'',snapshot:'a',delete_token:'0123456789abcdef'};});
+ await h.emit('input',{text:'【財務】把午餐那筆刪掉',source:'interactive'});
+ await h.tools.finance_action.execute('1',{operation:'delete',data:{description:['午餐']}});await h.emit('agent_settled',{});
+ await h.emit('input',{text:'今天天氣如何',source:'interactive'});
+ await h.emit('input',{text:'好',source:'interactive'});
+ assert.deepEqual(calls,['preview']);
 });
 test('model cannot access arbitrary files or silently fall back for unsupported receipt vision',async()=>{
  const h=harness(async()=>({code:0,stdout:'',stderr:'',snapshot:'a'}));

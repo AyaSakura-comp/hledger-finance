@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Workflow, parseData, formatStats } from './workflows.ts';
+import { Workflow, parseData, formatStats, isShortConfirm, postingLines } from './workflows.ts';
 import { fileStore } from './pending-store.ts';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +21,7 @@ test('mutation proposal is immutable and requires a later exact host confirmatio
  assert.match(p.text,/確認/);assert.ok(w.confirmation);
  assert.equal(await w.confirm('確認午餐150元而已'),null);assert.equal(calls.length,1);
  const receipt=await w.confirm('確認 '+w.confirmation);
- assert.equal(w.state,'done');assert.match(receipt!.text,/written/);
+ assert.equal(w.state,'done');assert.match(receipt!.text,/已記帳 1 筆/);
  assert.equal(calls[1].r.data.transactions[0].amount,'150');
  assert.equal(calls[1].o.expected_snapshot,'a');
  assert.equal(await w.confirm('確認 '+w.confirmation),null);
@@ -133,7 +133,7 @@ test('a preview can be confirmed exactly once from another process, bound to its
  assert.equal(await b.confirm('確認 not-a-token'),null);
  const other=W(bridge,()=>'2026-10-04',Date.now,fileStore('/other.journal',dir),'/other.journal');
  assert.equal(await other.confirm('確認 '+token),null);
- const r=await b.confirm('確認 '+token);assert.match(r!.text,/written/);
+ const r=await b.confirm('確認 '+token);assert.match(r!.text,/已記帳/);
  assert.equal(calls.at(-1).o.expected_snapshot,'a');assert.equal(calls.at(-1).r.data.transactions[0].amount,'150');
  const c=W(bridge,()=>'2026-10-04',Date.now,fileStore('/j/main.journal',dir),'/j/main.journal');
  assert.equal(await c.confirm('確認 '+token),null);assert.equal(await a.confirm('確認 '+token),null);
@@ -188,7 +188,7 @@ test('amend previews removal and replacement under one token and validates the n
  const x=W(async(r:any,o:any)=>{calls.push(structuredClone({r,o}));return o.mode==='preview'?{...preview,delete_token:'0123456789abcdef'}:{code:0,stdout:'REMOVED ADDED',stderr:''};},()=>'2026-10-04');
  x.begin('幫我把早餐改成 80');
  await x.propose({operation:'amend',data:{filter:{description:['早餐']},transactions:[{kind:'expense',description:'早餐',amount:'80',debit:'expenses:food:dining',credit:'assets:cash'}]}});
- const r=await x.confirm('確認 '+x.confirmation);assert.match(r!.text,/REMOVED ADDED/);
+ const r=await x.confirm('確認 '+x.confirmation);assert.match(r!.text,/已修改/);
  assert.equal(calls.at(-1).o.delete_token,'0123456789abcdef');assert.equal(calls.at(-1).r.data.transactions[0].amount,'80');
 });
 test('stats are summarised readably with exact figures',()=>{
@@ -250,7 +250,7 @@ test('a currency named by the user is never replaced by the TWD default',async()
 test('record previews are readable rows, not JSON',async()=>{
  const w=W(async()=>preview,()=>'2026-10-04');w.begin('午餐 120、飲料 50');
  const r=await w.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐',amount:'120',debit:'expenses:food:dining',credit:'assets:cash'}]}});
- assert.match(r.text,/記帳 預覽/);assert.match(r.text,/1\. 2026-10-04 午餐 120 TWD｜支出｜借 expenses:food:dining｜貸 （依付款規則）/);assert.doesNotMatch(r.text,/"operation"/);
+ assert.match(r.text,/請確認以下記帳（尚未寫入）/);assert.match(r.text,/1\. 2026-10-04 午餐 120 TWD｜支出｜借 expenses:food:dining｜貸 （依付款規則）/);assert.doesNotMatch(r.text,/"operation"/);assert.match(r.text,/回覆「確認」/);
 });
 test('an unstated payment account is left to the ledger payment rules',async()=>{
  const calls:any[]=[];const w=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-04');w.begin('午餐 120、飲料 50');
@@ -259,4 +259,9 @@ test('an unstated payment account is left to the ledger payment rules',async()=>
  const x=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-04');x.begin('午餐 120 元，用 liabilities:card 付');
  await x.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐',amount:'120',debit:'expenses:food:dining',credit:'liabilities:card'}]}});
  assert.equal(calls.at(-1).data.transactions[0].credit,'liabilities:card');
+});
+test('short confirmations and compact postings',()=>{
+ for(const t of ['確認','好','ok','OK!','對','確定。'])assert.ok(isShortConfirm(t),t);
+ for(const t of ['確認一下這筆是什麼','好像不對','ok google'])assert.equal(isShortConfirm(t),false,t);
+ assert.equal(postingLines('2026-10-04 洗車 [1/1]\n    ; kind:expense\n    expenses:transport:vehicle         300 TWD\n    assets:cash:wallet                -300 TWD\n'),'・2026-10-04 洗車 300 TWD｜expenses:transport:vehicle｜assets:cash:wallet');
 });

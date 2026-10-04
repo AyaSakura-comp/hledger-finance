@@ -4,8 +4,8 @@ import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import type { Request, Reply } from './workflows.ts';
 
-export type PendingAuthorization={token:string;request:Request;reply:Reply;expires:number;journal:string};
-export type PendingStore={save(p:PendingAuthorization):void;claim(token:string):PendingAuthorization|undefined;drop(token:string):void};
+export type PendingAuthorization={token:string;request:Request;reply:Reply;expires:number;journal:string;session?:string};
+export type PendingStore={save(p:PendingAuthorization):void;claim(token:string):PendingAuthorization|undefined;drop(token:string):void;latest(session:string):string|undefined;dropSession(session:string):void};
 
 // A preview must survive the pi process: piweb/piscord use one-shot print mode
 // for attachments and recycle idle RPC workers. The file is only an
@@ -24,5 +24,9 @@ export function fileStore(journal:string,root=process.env.PI_FINANCE_STATE_DIR??
    catch{return undefined;}finally{try{unlinkSync(claimed);}catch{}}
   },
   drop(token){try{unlinkSync(path(token));}catch{}},
+  // The newest unexpired preview of this conversation (for a plain "確認").
+  latest(session){let best:{t:string;at:number}|undefined;try{for(const f of readdirSync(dir)){if(!/^[0-9a-f-]{36}\.json$/.test(f))continue;try{const p=JSON.parse(readFileSync(join(dir,f),'utf8')) as PendingAuthorization;if(p.session===session&&p.journal===journal&&p.expires>Date.now()){const at=statSync(join(dir,f)).mtimeMs;if(!best||at>best.at)best={t:p.token,at};}}catch{}}}catch{}return best?.t;},
+  // Any other message from the user retires this conversation's previews.
+  dropSession(session){try{for(const f of readdirSync(dir)){if(!/^[0-9a-f-]{36}\.json$/.test(f))continue;try{const p=JSON.parse(readFileSync(join(dir,f),'utf8')) as PendingAuthorization;if(p.session===session)unlinkSync(join(dir,f));}catch{}}}catch{}},
  };
 }

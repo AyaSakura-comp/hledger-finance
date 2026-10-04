@@ -85,3 +85,14 @@ test('amount-first with a unit needs no space before the item',async()=>{
  assert.equal(e?.amount,'300');assert.equal(e?.description,'洗車');
  assert.equal(parseExpense('300洗車','2026-10-04'),null); // bare digits glued to text stay ambiguous
 });
+test('batch: unrequested payment is ignored; income routes by payment rules; one write',async()=>{
+ const {FinanceBatch}=await import('./core.ts');const writes:any[]=[];
+ const backend=async(args:string[],payload?:any)=>{if(args[0]==='classify')return JSON.stringify({binding:false,suggestion:{account:'expenses:food:dining'},categories:[{account:'expenses:food:dining'},{account:'expenses:food:drinks'}]});writes.push(payload);return 'Records ready: 3; duplicates skipped: 0';};
+ const b=new FinanceBatch(backend,async()=>['assets:cash:wallet','income:salary'],()=>{},async()=>({TWD:'assets:cash:wallet'}));
+ await b.prepare('午餐 120、飲料 50、收到薪水 50000 元','2026-10-04','t1');
+ assert.deepEqual(b.entries.map(e=>e.kind),['expense','expense','income']);
+ const r=await b.commit([{category:'expenses:food:dining',payment:'cash'},{category:'expenses:food:drinks'},{category:'income:salary'}]);
+ const rows=writes[0].transactions;assert.equal(writes.length,1);
+ assert.equal(rows[0].credit,undefined);assert.equal(rows[2].debit,'assets:cash:wallet');assert.equal(rows[2].credit,'income:salary');
+ assert.match(r,/已記帳 3 筆/);
+});

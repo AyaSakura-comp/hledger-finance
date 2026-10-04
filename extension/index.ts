@@ -1,19 +1,22 @@
 import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { FinanceFlow, parseExpense, localDate, pythonBackend, requireToolCall, userMessage, type Backend } from './core.ts';
+import { FinanceBatch, parseEntries, hledgerAccounts, localDate, pythonBackend, requireToolCall, userMessage, type Backend } from './core.ts';
 import { registerManaged } from './managed.ts';
 import type { Bridge } from './workflows.ts';
 
-export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;journal?:string;today?:()=>string;stateDir?:string}={}):ExtensionFactory {
+export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;journal?:string;today?:()=>string;stateDir?:string;accounts?:()=>Promise<string[]>}={}):ExtensionFactory {
  return (pi:ExtensionAPI)=>{
-  let flow:FinanceFlow|undefined;
+  let flow:FinanceBatch|undefined;let retries=0;
   let savedTools:string[]|undefined;
   const journal=options.journal??process.env.PI_FINANCE_JOURNAL??join(homedir(),'finance/main.journal');
   const backend=options.backend??pythonBackend({journal});
   const recent={at:0};
+  const accounts=options.accounts??hledgerAccounts(journal);
+  const paymentRules=async()=>{try{return (JSON.parse(await readFile(join(dirname(journal),'payment-account-rules.json'),'utf8')).currency_accounts??{}) as Record<string,string>;}catch{return {};}};
   registerManaged(pi,{journal,bridge:options.bridge,today:options.today,busy:()=>Boolean(flow),stateDir:options.stateDir,recent});
   const restore=()=>{if(savedTools){pi.setActiveTools(savedTools);savedTools=undefined;}flow=undefined;};
   const report=(content:string)=>pi.sendMessage({customType:'finance-receipt',content,display:true},{triggerTurn:false});
@@ -22,9 +25,9 @@ export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;
    if(flow){report('已有記帳流程準備中；本次輸入未寫入，請等待回執後重新提出。');return {action:'handled'};}
    const today=(options.today??localDate)();
    const text=userMessage(event.text);
-   if(event.images?.length||!parseExpense(text,today))return;
+   if(event.images?.length||!parseEntries(text,today))return;
    restore();savedTools=pi.getActiveTools();
-   flow=new FinanceFlow(backend,state=>pi.appendEntry('finance-state',{version:1,state}));
+   flow=new FinanceBatch(backend,accounts,state=>pi.appendEntry('finance-state',{version:1,state}),paymentRules);retries=0;
    try{
     await flow.prepare(text,today,`pi-${ctx.sessionManager.getSessionId()}-${randomUUID()}`);
     pi.setActiveTools(['finance_finish']);
@@ -32,32 +35,49 @@ export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;
   });
   pi.on('before_agent_start',event=>{
    if(flow?.state!=='ready')return;
-   return {systemPrompt:event.systemPrompt+'\nFinance FSM owns this expense. Call finance_finish exactly once, without commentary. Only select an account from provided categories; binding rule wins. Never invent or change amount, date or payment source. Clarify only material uncertainty, not routine category selection. Tool sends the final receipt; do not call other tools or emit a final answer.',message:{customType:'finance-ready',content:JSON.stringify({expense:flow.expense,...flow.evidence}),display:false}};
+   return {systemPrompt:event.systemPrompt+'\nFinance FSM owns these entries. Call finance_finish exactly once, without commentary, with entries: one {category} per entry in order (expense -> expense_categories, income -> income_categories; a binding suggestion wins). Add payment only for entries with payment_hint and only if an account in payment_accounts clearly matches it; otherwise omit it (ledger rules decide). Amount, date and currency are fixed by the host. Never ask questions: if unsure use the closest category or expenses:uncategorized.',message:{customType:'finance-ready',content:JSON.stringify(flow.context()),display:false}};
   });
-  pi.on('before_provider_request',event=>flow?.state==='ready'?requireToolCall(event.payload):undefined);
+  // A fast-path turn is one short tool call; cap the output so an occasional
+  // runaway (reasoning written as text) ends in seconds instead of a minute.
+  pi.on('before_provider_request',event=>{if(flow?.state!=='ready')return;const p=requireToolCall(event.payload) as any;if(!p)return;const cap=120+60*flow.entries.length;// Thinking is turned off for this turn: choosing a category needs no
+  // reasoning, and reasoning tokens would otherwise eat the output cap.
+  const out:any={...p,max_tokens:Math.min(p.max_tokens??cap,cap),enable_thinking:false,chat_template_kwargs:{...(p.chat_template_kwargs??{}),enable_thinking:false}};
+  for(const k of ['max_completion_tokens','reasoning_effort','reasoning','thinking','thinking_budget','thinking_budget_tokens','thinking_token_budget'])delete out[k];
+  return out;});
   pi.on('tool_call',event=>{
    if(flow&&event.toolName!=='finance_finish')return {block:true,reason:'Finance state machine permits only finance_finish for this request',terminate:true};
   });
   pi.registerTool({
    name:'finance_finish',label:'Finance',
-   description:'Finish the prepared expense: select exactly one category from finance-ready evidence, or ask one clarification. Host owns facts, validation and journal write. Returns final receipt and terminates. Output limited to 12000 characters.',
-   parameters:Type.Object({category:Type.Optional(Type.String()),question:Type.Optional(Type.String())},{additionalProperties:false}),
+   description:'Finish the prepared entries: one {category, payment?} per entry in order. Never ask questions. Host owns amounts, dates, currency, validation and the journal write. Returns the final receipt.',
+   parameters:Type.Object({entries:Type.Optional(Type.Array(Type.Object({category:Type.String(),payment:Type.Optional(Type.String())},{additionalProperties:false}))),category:Type.Optional(Type.String())},{additionalProperties:false}),
    async execute(_id,params,signal){
-    if(signal?.aborted)return {content:[{type:'text',text:'記帳已取消，未寫入。'}],details:{state:flow?.state??'idle',trace:flow?[...flow.trace]:[],error:'aborted'},terminate:true};
-    if(!flow||flow.state!=='ready')return {content:[{type:'text',text:'No writable prepared expense; stopped without replay.'}],details:{state:flow?.state??'idle',trace:flow?[...flow.trace]:[],error:''},terminate:true};
+    const details=()=>({state:flow?.state??'idle',trace:flow?[...flow.trace]:[],error:''});
+    if(signal?.aborted)return {content:[{type:'text',text:'記帳已取消，未寫入。'}],details:{...details(),error:'aborted'},terminate:true};
+    if(!flow||flow.state!=='ready')return {content:[{type:'text',text:'No writable prepared entries; stopped without replay.'}],details:details(),terminate:true};
+    const choices=params.entries??(params.category?[{category:params.category}]:undefined);
     try{
-     if(Boolean(params.category)===Boolean(params.question))throw new Error('Provide exactly one category or clarification question');
-     const text=params.question?flow.clarify(params.question):await flow.commit(params.category!);
+     if(!choices)throw new Error('Provide entries: one category per entry, in order');
+     const text=await flow.commit(choices!);
      recent.at=Date.now();
-     report(text.split('\n')[0]);
-     return {content:[{type:'text',text:text.slice(0,12000)}],details:{state:flow.state,trace:[...flow.trace],error:''},terminate:true};
+     const shown=text.split('\n').filter(l=>!/^\[master|^\s+\d+ file|^Appended to|^Record \d|^Records ready/.test(l)).join('\n');
+     report(shown);
+     return {content:[{type:'text',text:shown.slice(0,12000)}],details:details(),terminate:true};
     }catch(error){
-     const text=`記帳未確認成功，已停止；請先查帳，不要自動重試：${String(error)}`;
-     report(text);return {content:[{type:'text',text}],details:{state:flow.state,error:String(error),trace:[...flow.trace]},terminate:true};
+     // Validation happens before anything is written: let the model fix its
+     // choice (state is still ready) instead of failing the whole record.
+     if(flow.state==='ready'&&++retries<=2)return {content:[{type:'text',text:'Not written. Fix and call finance_finish again: '+String(error)}],details:details(),terminate:false};
+     const text=`記帳未完成，沒有寫入：${String(error).replace(/^Error:\s*/,'').slice(0,160)}`;
+     report(text);return {content:[{type:'text',text}],details:{...details(),error:String(error)},terminate:true};
     }
    },
   });
-  pi.on('agent_settled',()=>{if(flow?.state==='ready')report('記帳流程未完成，未寫入；請重新提出完整記帳請求。');restore();});
+  let nudged=false;
+  pi.on('agent_settled',()=>{
+   // One automatic retry when the model ended without calling the tool.
+   if(flow?.state==='ready'&&!nudged){nudged=true;pi.sendMessage({customType:'finance-fast-nudge',display:false,content:'No finance_finish call was made. Call finance_finish now with one category per entry; no other text.'},{triggerTurn:true});return;}
+   if(flow?.state==='ready')report('記帳流程未完成，未寫入；請重新提出完整記帳請求。');nudged=false;restore();
+  });
   pi.on('session_shutdown',restore);
   // Reload/fork never reconstructs an in-flight mutation. Journal import-id is the replay boundary.
   pi.on('session_start',restore);
