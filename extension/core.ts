@@ -168,6 +168,8 @@ export function parseEntries(raw:string,today:string):Entry[]|null{
   description=description.replace(/\s*(?:總共|一共)?(?:花了|用了|付了|繳了)$|\s+花$/,'').replace(/^(?:剛剛|剛才)\s*/,'').replace(/\s*(?:入帳|收入)$/,'').trim()||description;
   if(description.length>60||!/\p{L}/u.test(description)||/\d{3,}/.test(description.replace(/7-11|\d{1,2}(?:吋|寸|入|件|個|包|罐|人|天|晚|期)|iPhone ?\d+|\b\d{1,4}\b/gi,'')))return null;
   if(!/^[\p{L}\p{M}\p{N} ._&+\-()（）]+$/u.test(description))return null;
+  // Unconverted Zhuyin (iPhone keyboard typo, e.g. "ㄒㄧ ㄔㄜˋ") is not an item name.
+  if(/[\u3100-\u312F\u31A0-\u31BFˊˇˋ˙]/.test(description))return null;
   let currency='TWD';if(unit){const hit=CURRENCY.find(([re])=>re.test(unit));if(!hit)return null;currency=hit[1];}
   out.push({kind,description,amount,date,inferredDate,currency,inferredCurrency:!unit,payment});
  }

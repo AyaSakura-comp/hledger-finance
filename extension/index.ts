@@ -25,6 +25,8 @@ export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;
    if(flow){report('已有記帳流程準備中；本次輸入未寫入，請等待回執後重新提出。');return {action:'handled'};}
    const today=(options.today??localDate)();
    const text=userMessage(event.text);
+   // An amount with unconverted Zhuyin would otherwise reach the general model.
+   if(!event.images?.length&&/\d/.test(text)&&/[\u3100-\u312F\u31A0-\u31BFˊˇˋ˙]/.test(text)){report('看起來有注音沒有選字（例如「ㄒㄧ ㄔㄜˋ」），沒有記帳。請改成國字後重新輸入，例如「300 洗車」。');return {action:'handled'};}
    if(event.images?.length||!parseEntries(text,today))return;
    restore();savedTools=pi.getActiveTools();
    flow=new FinanceBatch(backend,accounts,state=>pi.appendEntry('finance-state',{version:1,state}),paymentRules);retries=0;

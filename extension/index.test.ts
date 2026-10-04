@@ -52,3 +52,8 @@ test('busy input does not mutate or hijack another agent run',async()=>{
  await h.hooks.input({text:'午餐1500元',source:'interactive',streamingBehavior:'steer'},h.ctx);
  assert.equal(calls,0);assert.deepEqual(h.active(),['read','bash']);
 });
+test('an amount with unconverted Zhuyin gets a retype notice and no write',async()=>{
+ let writes=0;const h=harness(async(args:string[])=>args[0]==='classify'?JSON.stringify(evidence):(writes++,'Records ready: 1; duplicates skipped: 0'));
+ const r=await h.hooks.input({text:'[Web user: web]\n【記帳】300 ㄒㄧ ㄔㄜˋ',source:'interactive'},h.ctx);
+ assert.equal(r?.action,'handled');assert.equal(writes,0);assert.ok(h.messages.some(m=>m.content.includes('注音')));
+});

@@ -96,3 +96,8 @@ test('batch: unrequested payment is ignored; income routes by payment rules; one
  assert.equal(rows[0].credit,undefined);assert.equal(rows[2].debit,'assets:cash:wallet');assert.equal(rows[2].credit,'income:salary');
  assert.match(r,/已記帳 3 筆/);
 });
+test('unconverted Zhuyin is never accepted as an item name',async()=>{
+ const {parseEntries,userMessage}=await import('./core.ts');
+ assert.equal(parseEntries(userMessage('【記帳】300 ㄒㄧ ㄔㄜˋ'),'2026-10-04'),null);
+ assert.equal(parseEntries('300 洗車','2026-10-04')?.[0].description,'洗車');
+});
