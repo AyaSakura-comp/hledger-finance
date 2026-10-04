@@ -6,7 +6,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // Test bridges answer the host's expense-category check like the real backend.
-const catalogReply={code:0,stdout:JSON.stringify({categories:[{account:'expenses:food:dining'},{account:'expenses:food:groceries'},{account:'expenses:transport:transit'},{account:'expenses:shopping'}]}),stderr:''};
+const catalogReply={code:0,stdout:JSON.stringify({categories:[{account:'expenses:food:dining'},{account:'expenses:food:groceries'},{account:'expenses:food:drinks'},{account:'expenses:transport:transit'},{account:'expenses:shopping'}]}),stderr:''};
 const withCatalog=(bridge:any)=>async(r:any,o:any)=>r.operation==='classify'?catalogReply:bridge(r,o);
 const W=(bridge:any,...rest:any[])=>new (Workflow as any)(withCatalog(bridge),...rest) as Workflow;
 const preview={code:0,stdout:'150 TWD debit=expenses:food:dining credit=assets:cash',stderr:'preview',snapshot:'a'};
@@ -106,7 +106,7 @@ test('a single explicit payment account fills missing expense credit only',async
  const calls:any[]=[];const w=W(async(r)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-03');
  w.begin('午餐150元、咖啡95元，付款都用assets:cash');
  await w.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐',amount:'150',debit:'expenses:food:dining'},{kind:'expense',description:'咖啡',amount:'95',debit:'expenses:food:dining',credit:'liabilities:card'}]}});
- assert.equal(calls[0].data.transactions[0].credit,'assets:cash');assert.equal(calls[0].data.transactions[1].credit,'liabilities:card');
+ assert.equal(calls[0].data.transactions[0].credit,'assets:cash');assert.equal(calls[0].data.transactions[1].credit,'assets:cash');
  const x=W(async(r)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-03');
  x.begin('午餐付款assets:cash，咖啡付款liabilities:card');
  await x.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐',amount:'150'}]}});
@@ -162,7 +162,7 @@ test('host normalizes account casing and NTD, and owns receipt import ids',async
  w.begin('幫我記這張收據','image','abc');
  await w.propose({operation:'ingest',data:{defaults:{currency:'NTD'},transactions:[{kind:'expense',description:'全聯',amount:'460',debit:'Expenses:Food:Groceries',credit:'Assets:Cash',import_id:'PX-1'}]}});
  const row=calls.find(c=>c.operation==='ingest').data;
- assert.equal(row.defaults.currency,'TWD');assert.equal(row.transactions[0].debit,'expenses:food:groceries');assert.equal(row.transactions[0].credit,'assets:cash');assert.equal(row.transactions[0].import_id,'src-abc-0');
+ assert.equal(row.defaults.currency,'TWD');assert.equal(row.transactions[0].debit,'expenses:food:groceries');assert.equal(row.transactions[0].credit,undefined);assert.equal(row.transactions[0].import_id,'src-abc-0');
  const x=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-04');
  x.begin('記到 liabilities:Card-A');
  await x.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'x',amount:'1',debit:'expenses:shopping',credit:'liabilities:Card-A'}]}});
@@ -246,4 +246,17 @@ test('a currency named by the user is never replaced by the TWD default',async()
  const y=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-04');y.begin('午餐 150 元');
  await y.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐',amount:'150',debit:'expenses:food:dining',credit:'assets:cash'}]}});
  assert.equal(calls.at(-1).data.defaults.currency,'TWD');
+});
+test('record previews are readable rows, not JSON',async()=>{
+ const w=W(async()=>preview,()=>'2026-10-04');w.begin('午餐 120、飲料 50');
+ const r=await w.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐',amount:'120',debit:'expenses:food:dining',credit:'assets:cash'}]}});
+ assert.match(r.text,/記帳 預覽/);assert.match(r.text,/1\. 2026-10-04 午餐 120 TWD｜支出｜借 expenses:food:dining｜貸 （依付款規則）/);assert.doesNotMatch(r.text,/"operation"/);
+});
+test('an unstated payment account is left to the ledger payment rules',async()=>{
+ const calls:any[]=[];const w=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-04');w.begin('午餐 120、飲料 50');
+ await w.propose({operation:'ingest',data:{defaults:{credit:'assets:cash'},transactions:[{kind:'expense',description:'午餐',amount:'120',debit:'expenses:food:dining',credit:'assets:cash'},{kind:'expense',description:'飲料',amount:'50',debit:'expenses:food:drinks'}]}});
+ const d=calls.find(c=>c.operation==='ingest').data;assert.equal(d.defaults.credit,undefined);assert.equal(d.transactions[0].credit,undefined);
+ const x=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-04');x.begin('午餐 120 元，用 liabilities:card 付');
+ await x.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐',amount:'120',debit:'expenses:food:dining',credit:'liabilities:card'}]}});
+ assert.equal(calls.at(-1).data.transactions[0].credit,'liabilities:card');
 });

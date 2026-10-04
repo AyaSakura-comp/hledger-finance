@@ -79,3 +79,9 @@ test('voice filler is trimmed from the fast-path description only',async()=>{
  assert.equal(parseExpense('記一下，咖啡 95 元','2026-10-04')?.amount,'95');
  assert.equal(parseExpense('花花 50 元','2026-10-04')?.description,'花花');
 });
+test('amount-first with a unit needs no space before the item',async()=>{
+ const {parseExpense,userMessage}=await import('./core.ts');
+ const e=parseExpense(userMessage('[Web user: web]\n【記帳】300元洗車'),'2026-10-04');
+ assert.equal(e?.amount,'300');assert.equal(e?.description,'洗車');
+ assert.equal(parseExpense('300洗車','2026-10-04'),null); // bare digits glued to text stay ambiguous
+});

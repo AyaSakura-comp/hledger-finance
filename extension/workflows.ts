@@ -80,6 +80,12 @@ export class Workflow {
     if(!rows.some((r:any)=>String(r.debit).toLowerCase()===debit.toLowerCase()&&String(r.credit).toLowerCase()===credit.toLowerCase()))
      throw new Error(`The user explicitly specified debit ${debit} / credit ${credit}; one row must use exactly those sides (and the matching kind, e.g. refund for a refund)`);
    }
+   // The payment side of an expense comes from the user's words or the
+   // ledger's payment rules (e.g. TWD -> assets:cash:wallet), never from a
+   // model guess such as a generic assets:cash.
+   const said=(a:any)=>typeof a==='string'&&this.input.toLowerCase().includes(a.toLowerCase());
+   if(request.data.defaults&&!said(request.data.defaults.credit)&&(request.data.defaults.kind??'expense')==='expense')delete request.data.defaults.credit;
+   for(const r of request.data.transactions)if((r.kind??request.data.defaults?.kind)==='expense'&&r.credit&&!said(r.credit))delete r.credit;
    // A single explicitly named payment account is a user fact: apply it to
    // expense rows the model left without a credit side.
    const paid=[...new Set([...this.input.normalize('NFKC').matchAll(/付款(?:都用|帳戶|方式)?(?:用|是|為|:|：)?\s*((?:assets|liabilities):[A-Za-z0-9_:.-]+)/g)].map(m=>m[1]))];
@@ -147,10 +153,10 @@ export class Workflow {
    const token=randomUUID();this.pending={request,reply:structuredClone(reply),token,expires:this.clock()+600000};this.state='awaiting_confirmation';
    // Full candidate preview is mandatory. Do not offer confirmation for a
    // truncated preview: narrow the batch/filter instead.
-   const preview=JSON.stringify(request,null,2)+'\n'+reply.stdout+'\n'+reply.stderr;
+   const preview=(['ingest','amend'].includes(request.operation)?summarizeRows(request):JSON.stringify(request,null,2))+'\n'+reply.stdout+'\n'+reply.stderr;
    if(Buffer.byteLength(preview)>45000||preview.split('\n').length>1800)throw new Error('Preview too large to show completely; narrow scope');
    this.store?.save({token,request,reply:structuredClone(reply),expires:this.pending.expires,journal:this.journal});
-   return {text:`尚未修改帳本／規則／備份。請核對完整 ${request.operation} 預覽（包含所有候選）。\n${preview}\n\n僅完整同意以上範圍時，在下一則訊息輸入：確認 ${token}\n只同意部分內容請取消後重新提出；取消：取消記帳。授權有效 10 分鐘。`,state:this.state};
+   return {text:`尚未修改帳本／規則／備份。請核對完整 ${({ingest:'記帳',amend:'修改',delete:'刪除',undo:'復原',rules:'規則',backup:'備份',installment:'分期',loan:'貸款',historical:'歷史匯入'} as Record<string,string>)[request.operation]??request.operation} 預覽（包含所有候選）。\n${preview}\n\n僅完整同意以上範圍時，在下一則訊息輸入：確認 ${token}\n只同意部分內容請取消後重新提出；取消：取消記帳。授權有效 10 分鐘。`,state:this.state};
   }catch(error){this.pending=undefined;this.repairable=!signal?.aborted;this.state='failed';throw error;}
  }
  async confirm(text:string,signal?:AbortSignal):Promise<Receipt|null>{
@@ -279,4 +285,13 @@ export function formatStats(stdout:string):string|undefined{
  const cats=(o:any,label:string)=>{const rows=Object.entries(o??{}).flatMap(([acct,m]:any)=>Object.entries(m).map(([c,a]:any)=>({acct,c,a:Number(String(a).replace(/^-/,'')),raw:String(a).replace(/^-/,'')}))).sort((x,y)=>y.a-x.a);if(rows.length){lines.push(label);for(const r of rows)lines.push(`  ${r.acct}  ${r.raw} ${r.c}`);}};
  cats(d.expense_categories,'支出分類：');cats(d.income_categories,'收入分類：');
  return lines.join('\n');
+}
+
+// Human-readable proposal for record/amend previews (the backend output that
+// follows shows the exact journal text that would be written).
+export function summarizeRows(request:Request):string{
+ const d=request.data.defaults??{};const kinds:Record<string,string>={expense:'支出',income:'收入',transfer:'轉帳',refund:'退款','opening-balance':'期初',adjustment:'調整'};
+ const rows=(request.data.transactions??[]).map((r:any,i:number)=>{const x={...d,...r};return `${i+1}. ${x.date??''} ${x.description??''} ${x.amount??''} ${x.currency??''}｜${kinds[x.kind]??x.kind??''}｜借 ${x.debit??'（依規則）'}｜貸 ${x.credit??'（依付款規則）'}${x.debit_amount?`｜收到 ${x.debit_amount} ${x.debit_currency??''}`:''}`;});
+ const filter=request.operation==='amend'?`將移除符合 ${JSON.stringify(request.data.filter)} 的一筆，並寫入：\n`:'將寫入：\n';
+ return filter+rows.join('\n');
 }

@@ -30,7 +30,8 @@ export function parseExpense(raw:string,today:string):Expense|null {
  if(/今天|昨天|前天/.test(text))return null;
  const number='(?:[1-9]\\d{0,2}(?:,\\d{3})+|[1-9]\\d*)(?:\\.\\d{1,2})?';
  const tail=new RegExp(`^(.+?)\\s*(${number})\\s*(元|TWD|NT\\$)?$`,'i');
- const head=new RegExp(`^(${number})\\s*(元|TWD|NT\\$)?\\s+(.+)$`,'i');
+ // "300 洗車", "300元 洗車" and "300元洗車" (no space needed after a unit).
+ const head=new RegExp(`^(${number})\\s*(?:(元|TWD|NT\\$)\\s*|\\s+)(.+)$`,'i');
  const a=text.match(tail), b=text.match(head);
  // Trailing spending verbs and a leading 剛剛/剛才 are speech filler, not the item.
  const description=(a?.[1] ?? b?.[3] ?? '').trim().replace(/\s*(?:總共|一共)?(?:花了|用了|付了)$|\s+花$/,'').replace(/^(?:剛剛|剛才)\s*/,'').trim();

@@ -177,10 +177,13 @@ export function registerManaged(pi:ExtensionAPI,options:{journal:string;bridge?:
   try{const r=await w.propose({operation:params.operation,data:parseData(params.data)},signal);report(r.text);return result(r.text);}
   catch(e){
    if(++proposalErrors<=2&&(w.state==='collecting'||w.resumeDraft())){
-    const text='提案驗證失敗，未執行寫入／刪除／備份。可修正提案格式；不可猜補金額、方向或帳戶。錯誤：'+String(e);report(text);return result(text,false);
+    // Retryable validation feedback is for the model only; the user sees the
+    // final preview or a short stop notice, not internal error dumps.
+    const text='提案驗證失敗，未執行寫入／刪除／備份。可修正提案格式；不可猜補金額、方向或帳戶。錯誤：'+String(e);return result(text,false);
    }
    if(w.state==='collecting')w.cancel();
-   const text='財務流程停止，未執行寫入／刪除／備份：'+String(e);report(text);return result(text);
+   const detail=String(e).replace(/^Error:\s*(?:error:\s*)?/i,'').split(/[;\n]/)[0].slice(0,160);
+   const text='財務流程停止，未執行寫入／刪除／備份：'+String(e);report('財務流程停止，沒有寫入任何資料。原因：'+detail+'\n請換個說法重新提出，或補充缺少的資訊。');return result(text);
   }
  }});}
  installAction();
