@@ -31,6 +31,15 @@ idle -> collecting -> preparing -> awaiting_confirmation -> executing -> done
 - Mutations bind to a journal/rules snapshot; a stale snapshot, expired token (10 min) or uncertain outcome stops without retry.
 - Readonly results return directly; chart paths are created by the host.
 
+## Without the original skill (2026-10-04)
+
+The `hledger-finance` skill is no longer registered (symlink removed from `~/.hermes/skills`, which `~/.pi/agent/skills` and `~/.claude/skills` point to; restore with `ln -s ~/src/hledger-finance ~/.hermes/skills/hledger-finance`). The extension alone owns finance:
+
+- **Ledger guard:** pi's `write`/`edit` into the ledger directory and shell commands touching it, `finance.py`/`hfin`, or `hledger add/import` are blocked in every turn. Reads stay allowed.
+- **`finance_handoff`:** the only finance tool visible in ordinary turns. When the model judges a message to be about the user's money (anything keyword detection missed), it hands the latest message to the guarded workflow mid-turn.
+- **Detection:** everyday phrasing (`花了多少錢`, `現金還剩多少`, `午餐 120、飲料 50`, `花了 230`) and follow-ups (`剛剛那筆`, `改成`, `刪掉`) within 15 minutes of a finance action.
+- **`amend`:** changes (`把早餐改成 80`) remove exactly one matching entry and add the corrected row under one confirmation; a replacement that would not be written refuses the preview, and a failed add undoes the deletion.
+
 ## Gateway integration (piweb / piscord)
 
 - **Envelopes:** gateways send `[optional history]\n[Web user: x]` or `[Discord user: x]` followed by the message (voice under `[Voice message transcription: f]`). The extension only inspects the text after the last user header, so history can't trigger finance mode and wrapped `確認 <token>` still matches. Spoken amounts (`四百六十塊`) become digits before parsing.

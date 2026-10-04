@@ -56,3 +56,11 @@ Real pi (`~/src/pi-agent`) + local Qwen, real gateway prompt formats, disposable
 | Non-finance message with finance words in history | Not intercepted |
 | Regression | workflows 34/34 (2 runs), Taiwan fast path 49/50 (C38 category choice), backend 454/454, extension 50/50 |
 | Production journal, read-only stats with the installed package | Correct data, checksum unchanged |
+
+## 2026-10-04 skill removed — conversation test
+
+Original skill unregistered. Real pi + Qwen, normal settings, `[Web user: web]` envelope, one continuous session, disposable journal, production checksum guard.
+
+First run without the skill exposed: unrecognized phrasing went to the plain model, which **deleted an entry by editing the journal file directly (no preview)**, read the journal itself, drew its own chart, and silently failed to record `午餐 120、飲料 50`. Fixed with a ledger write guard, a `finance_handoff` tool, hidden workflow-only tools, broader/follow-up detection, `amend`, `kind:` query mapping (previously a silent 0 result), readable stats, argparse errors returned instead of crashing the bridge, host-owned text import ids (the model had copied an id from history, making an amend delete without adding) and no-token previews when nothing would be written.
+
+Final: 12/12 messages correct in two consecutive runs; final ledger exact (lunch 120, drink 50, breakfast amended 65→80, taxi deleted); chart values correct; weather question not intercepted; production journal unchanged. Known chart issue (pre-existing): category colours differ between the donut and the ranking bars.

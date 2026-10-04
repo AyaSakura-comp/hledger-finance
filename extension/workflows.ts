@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { localDate } from './core.ts';
 import type { PendingStore } from './pending-store.ts';
 export const readonlyOperations=['query','stats','visualize','check','audit','classify','native','settings'] as const;
-export const mutationOperations=['ingest','historical','installment','loan','delete','undo','rules','backup'] as const;
+export const mutationOperations=['ingest','amend','historical','installment','loan','delete','undo','rules','backup'] as const;
 export type Request={operation:string;data:Record<string,any>};
 export type Reply={code:number;stdout:string;stderr:string;snapshot?:string;delete_token?:string;images?:string[]};
 export type Bridge=(request:Request,options:{mode:'preview'|'execute';expected_snapshot?:string;delete_token?:string;signal?:AbortSignal})=>Promise<Reply>;
@@ -41,8 +41,15 @@ export class Workflow {
   if(signal?.aborted)throw new Error('Aborted');
   if(![...readonlyOperations,...mutationOperations].includes(input.operation as any))throw new Error('Unknown finance operation');
   const request:Request=structuredClone(input);
+  // Presentation-only options: map obvious synonyms and drop unsupported
+  // formats instead of failing (they never change which records are used).
+  if(['query','stats','visualize','delete'].includes(request.operation)&&request.data&&typeof request.data==='object'){
+   const interval:Record<string,string>={day:'daily',daily:'daily',week:'weekly',weekly:'weekly',month:'monthly',monthly:'monthly',quarter:'quarterly',quarterly:'quarterly',year:'yearly',yearly:'yearly'};
+   if(typeof request.data.interval==='string'){const v=interval[request.data.interval.toLowerCase()];if(v)request.data.interval=v;else delete request.data.interval;}
+   if('format' in request.data&&!['txt','csv','json','html'].includes(String(request.data.format)))delete request.data.format;
+  }
   if(request.operation==='visualize'&&/每(?:個|種)?幣別|逐幣別|各幣別|every currency|each currency/i.test(this.input))delete request.data.currency;
-  if(request.operation==='ingest'){
+  if(['ingest','amend'].includes(request.operation)){
    if(!Array.isArray(request.data.transactions)||!request.data.transactions.length)throw new Error('Transaction batch required');
    // Ledger convention is lowercase accounts and ISO currencies. Normalize
    // spellings the user did not type verbatim (Assets:Cash, Expense:Food, NTD).
@@ -64,6 +71,15 @@ export class Workflow {
     const duplicate=request.data.transactions.find((r:any)=>r!==transfers[0]&&String(r.amount)===facts.debit_amount&&String(r.currency??request.data.defaults?.currency)===facts.debit_currency&&(r.debit===facts.debit||r.credit===facts.debit));
     if(duplicate)throw new Error(`The transfer row already records receiving ${facts.debit_amount} ${facts.debit_currency} into ${facts.debit}; remove the separate ${duplicate.kind} row (it would double count)`);
    }
+   // Explicit "debit X、credit Y" pairs in the user's words are facts: every
+   // pair must appear on some proposed row (stops e.g. a refund being booked
+   // as an expense with the sides swapped).
+   const pairs=[...this.input.normalize('NFKC').matchAll(/debit\s*[:：]?\s*((?:assets|liabilities|expenses|income|equity):[A-Za-z0-9_:.-]+)\s*[、,，;；]?\s*credit\s*[:：]?\s*((?:assets|liabilities|expenses|income|equity):[A-Za-z0-9_:.-]+)/gi)];
+   for(const [,debit,credit] of pairs){
+    const rows=request.data.transactions.map((r:any)=>({debit:r.debit??request.data.defaults?.debit,credit:r.credit??request.data.defaults?.credit}));
+    if(!rows.some((r:any)=>String(r.debit).toLowerCase()===debit.toLowerCase()&&String(r.credit).toLowerCase()===credit.toLowerCase()))
+     throw new Error(`The user explicitly specified debit ${debit} / credit ${credit}; one row must use exactly those sides (and the matching kind, e.g. refund for a refund)`);
+   }
    // A single explicitly named payment account is a user fact: apply it to
    // expense rows the model left without a credit side.
    const paid=[...new Set([...this.input.normalize('NFKC').matchAll(/付款(?:都用|帳戶|方式)?(?:用|是|為|:|：)?\s*((?:assets|liabilities):[A-Za-z0-9_:.-]+)/g)].map(m=>m[1]))];
@@ -78,18 +94,29 @@ export class Workflow {
    }
    const defaults={...(request.data.defaults??{})};
    const inherited=Array.isArray(defaults.tags)?defaults.tags:[];delete defaults.tags;
-   request.data.defaults={...defaults,date:defaults.date??this.today(),currency:defaults.currency??'TWD'};
+   // TWD is only a default when the user named no other currency; a missing
+   // currency must never turn "1200 JPY" into TWD.
+   const named=[...new Set([...this.input.normalize('NFKC').toUpperCase().matchAll(/\b(USD|JPY|EUR|CNY|HKD|GBP|KRW|SGD|AUD|CAD|THB|TWD)\b|(美元|美金)|(日圓|日幣|日元)|(人民幣)|(港幣)|(歐元)/g)].map(m=>m[1]??(m[2]?'USD':m[3]?'JPY':m[4]?'CNY':m[5]?'HKD':'EUR')))].filter(c=>c!=='TWD');
+   const fallback=named.length===1?named[0]:named.length?undefined:'TWD';
+   if(!defaults.currency&&!fallback&&request.data.transactions.some((r:any)=>!r.currency))throw new Error(`The user mentioned several currencies (${named.join(', ')}); give every row an explicit currency`);
+   request.data.defaults={...defaults,date:defaults.date??this.today(),currency:defaults.currency??fallback};
    request.data.transactions=request.data.transactions.map((row:any,index:number)=>{
     const r={...row};
     // A receipt image/PDF is identified by its content digest, so re-sending
     // the same file is skipped as a duplicate. Model ids would defeat that.
-    if(['image','pdf'].includes(this.source))r.import_id=`${this.id}-${index}`;
+    // Only rows read from a CSV/JSON source keep their own ids; otherwise a
+    // model could reuse an id from conversation history and the row would be
+    // silently skipped as a duplicate.
+    if(this.source!=='file')r.import_id=`${this.id}-${index}`;
     // kind fixes posting direction; an exactly reversed pair is the same
     // fact written backwards, so canonicalize instead of failing.
     const family=(a:any)=>String(a??'').split(':')[0],side=(a:any)=>['assets','liabilities'].includes(family(a));
     const kind=r.kind??defaults.kind,debit=r.debit??defaults.debit,credit=r.credit??defaults.credit;
     const reversed=kind==='expense'?family(credit)==='expenses'&&side(debit):kind==='income'?family(debit)==='income'&&side(credit):kind==='refund'?family(debit)==='expenses'&&side(credit):false;
-    if(reversed){r.debit=credit;r.credit=debit;}
+    // Never flip sides the user stated explicitly; a wrong kind must then be
+    // fixed by the model (the backend rejects kind/side mismatches).
+    const stated=pairs.some(([,d,c])=>String(debit).toLowerCase()===d.toLowerCase()&&String(credit).toLowerCase()===c.toLowerCase());
+    if(reversed&&!stated){r.debit=credit;r.credit=debit;}
     if(!r.import_id)r.import_id=`${this.id}-${index}`;
     // Provenance is host-known: replace any model source tag and drop
     // non-canonical labels (they are metadata, never material facts).
@@ -103,15 +130,20 @@ export class Workflow {
   }
   this.repairable=false;this.state='preparing';
   try{
-   if(request.operation==='ingest')await this.checkExpenseAccounts(request,signal);
+   if(['ingest','amend'].includes(request.operation))await this.checkExpenseAccounts(request,signal);
    const reply=await this.bridge(request,{mode:'preview',signal});
    const valid=reply.code===0||(request.operation==='delete'&&reply.code===3);
    if(!valid)throw new Error(reply.stderr||reply.stdout||'Backend preview failed');
    if(readonlyOperations.includes(request.operation as any)){
-    this.state='done';return {text:this.boundOutput(reply),state:this.state};
+    this.state='done';return {text:(request.operation==='stats'?formatStats(reply.stdout):undefined)??(this.boundOutput(reply)||'沒有符合條件的紀錄。'),state:this.state};
+   }
+   // Never hand out a token for a change that writes nothing.
+   if(['ingest','amend'].includes(request.operation)&&/Records ready: 0\b/.test(reply.stdout+'\n'+reply.stderr)){
+    if(request.operation==='amend')throw new Error('Replacement would not be written (duplicate of an existing entry); nothing changed');
+    this.state='done';return {text:'沒有新增：這些紀錄與帳本既有紀錄重複，未寫入。\n'+this.boundOutput(reply),state:this.state};
    }
    if(!reply.snapshot)throw new Error('No preview snapshot; authorization refused');
-   if(request.operation==='delete'&&!reply.delete_token)throw new Error('No backend deletion token');
+   if(['delete','amend'].includes(request.operation)&&!reply.delete_token)throw new Error('No backend deletion token');
    const token=randomUUID();this.pending={request,reply:structuredClone(reply),token,expires:this.clock()+600000};this.state='awaiting_confirmation';
    // Full candidate preview is mandatory. Do not offer confirmation for a
    // truncated preview: narrow the batch/filter instead.
@@ -234,3 +266,17 @@ export function parseData(raw:unknown):Record<string,any>{
  return top;
 }
 export function sourceDigest(data:string){return createHash('sha256').update(data).digest('hex');}
+
+// Readable summary of the backend stats JSON (exact figures, no rounding).
+export function formatStats(stdout:string):string|undefined{
+ let d:any;try{d=JSON.parse(stdout);}catch{return undefined;}
+ if(!d||typeof d!=='object'||!d.currencies)return undefined;
+ const period=d.period?.begin?`${d.period.begin} ～ ${d.period.end_exclusive?new Date(Date.parse(d.period.end_exclusive)-86400000).toISOString().slice(0,10):''}`:'全部期間';
+ const lines=[`收支統計（${period}，共 ${d.transaction_count} 筆）`];
+ const cur=Object.entries(d.currencies as Record<string,any>);
+ if(!cur.length)lines.push('沒有符合條件的收支紀錄。');
+ for(const [c,v] of cur)lines.push(`${c}：收入 ${v.income}｜支出 ${String(v.expense).replace(/^-/,'')}｜淨額 ${v.net}`);
+ const cats=(o:any,label:string)=>{const rows=Object.entries(o??{}).flatMap(([acct,m]:any)=>Object.entries(m).map(([c,a]:any)=>({acct,c,a:Number(String(a).replace(/^-/,'')),raw:String(a).replace(/^-/,'')}))).sort((x,y)=>y.a-x.a);if(rows.length){lines.push(label);for(const r of rows)lines.push(`  ${r.acct}  ${r.raw} ${r.c}`);}};
+ cats(d.expense_categories,'支出分類：');cats(d.income_categories,'收入分類：');
+ return lines.join('\n');
+}

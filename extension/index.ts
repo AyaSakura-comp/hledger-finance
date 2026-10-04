@@ -13,7 +13,8 @@ export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;
   let savedTools:string[]|undefined;
   const journal=options.journal??process.env.PI_FINANCE_JOURNAL??join(homedir(),'finance/main.journal');
   const backend=options.backend??pythonBackend({journal});
-  registerManaged(pi,{journal,bridge:options.bridge,today:options.today,busy:()=>Boolean(flow),stateDir:options.stateDir});
+  const recent={at:0};
+  registerManaged(pi,{journal,bridge:options.bridge,today:options.today,busy:()=>Boolean(flow),stateDir:options.stateDir,recent});
   const restore=()=>{if(savedTools){pi.setActiveTools(savedTools);savedTools=undefined;}flow=undefined;};
   const report=(content:string)=>pi.sendMessage({customType:'finance-receipt',content,display:true},{triggerTurn:false});
   pi.on('input',async(event,ctx)=>{
@@ -47,6 +48,7 @@ export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;
     try{
      if(Boolean(params.category)===Boolean(params.question))throw new Error('Provide exactly one category or clarification question');
      const text=params.question?flow.clarify(params.question):await flow.commit(params.category!);
+     recent.at=Date.now();
      report(text.split('\n')[0]);
      return {content:[{type:'text',text:text.slice(0,12000)}],details:{state:flow.state,trace:[...flow.trace],error:''},terminate:true};
     }catch(error){

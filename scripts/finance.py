@@ -1033,6 +1033,40 @@ def render_installments(
     return "".join(chunks)
 
 
+QUERY_PREFIXES = {
+    "acct", "desc", "payee", "note", "tag", "amt", "date", "date2", "cur",
+    "status", "real", "depth", "code", "expr", "any", "all", "type",
+}
+ACCOUNT_FAMILIES = {"assets", "liabilities", "expenses", "income", "equity", "revenues"}
+JOURNAL_TAGS = {"kind", "source", "import-id", "inferred", "loan", "installment"}
+
+
+def normalize_query_terms(terms: Sequence[str]) -> list[str]:
+    """Map journal tag shorthands and refuse unknown prefixes.
+
+    hledger treats an unknown ``word:value`` as an account regex, so a term
+    like ``kind:expense`` silently matches nothing and a report shows zero.
+    """
+    normalized = []
+    for term in terms:
+        text = term.strip()
+        negated = text.startswith("not:")
+        body = text[4:] if negated else text
+        match = re.fullmatch(r"([A-Za-z][A-Za-z0-9_-]*)([:=])(.*)", body)
+        if match:
+            prefix, _sep, value = match.groups()
+            lowered = prefix.lower()
+            if lowered in JOURNAL_TAGS:
+                body = f"tag:{lowered}={value}"
+            elif lowered not in QUERY_PREFIXES and lowered not in ACCOUNT_FAMILIES:
+                raise ValueError(
+                    f"Unknown query term {term!r}; use acct:, desc:, amt:, date:, cur:, "
+                    "tag:NAME=VALUE (e.g. tag:kind=expense) or an account name"
+                )
+        normalized.append(("not:" if negated else "") + body)
+    return normalized
+
+
 def build_hledger_query(
     *,
     journal: Path,
@@ -1092,7 +1126,7 @@ def build_hledger_query(
     command.extend(f"desc:{item}" for item in descriptions)
     for tag in tags:
         command.append("tag:" + tag.replace(":", "=", 1))
-    command.extend(raw_terms)
+    command.extend(normalize_query_terms(raw_terms))
     return command
 
 
@@ -3941,7 +3975,7 @@ def command_stats(args: argparse.Namespace) -> int:
         command.append(f"--begin={begin.isoformat()}")
     if end:
         command.append(f"--end={end.isoformat()}")
-    command.extend(args.where)
+    command.extend(normalize_query_terms(args.where))
     result = _run(command, capture=True)
     if result.returncode:
         print(result.stderr, file=sys.stderr)

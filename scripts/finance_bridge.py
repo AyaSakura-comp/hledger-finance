@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import finance as f
 
 READONLY = {'query', 'stats', 'visualize', 'check', 'audit', 'classify', 'native', 'settings'}
-MUTATIONS = {'ingest', 'historical', 'installment', 'loan', 'delete', 'undo', 'rules', 'backup'}
+MUTATIONS = {'ingest', 'historical', 'installment', 'loan', 'delete', 'undo', 'rules', 'backup', 'amend'}
 ALIASES = {'loan': 'loan-resume'}
 FILTERS = {'period', 'begin', 'end', 'account', 'description', 'tag', 'where'}
 NATIVE_REPORTS = {'accounts', 'activity', 'aregister', 'balance', 'balancesheet', 'balancesheetequity', 'cashflow', 'codes', 'commodities', 'descriptions', 'incomestatement', 'notes', 'payees', 'prices', 'print', 'register', 'roi', 'stats', 'tags'}
@@ -50,7 +50,12 @@ def invoke(journal, args, payload=None):
         subprocess.run = captured_run
         sys.stdin = io.StringIO(json.dumps(payload, ensure_ascii=False, default=str) if payload is not None else '')
         with redirect_stdout(out), redirect_stderr(err):
-            code = f.main(['--journal', str(journal), *args])
+            try:
+                code = f.main(['--journal', str(journal), *args])
+            except SystemExit as exc:
+                # argparse rejects invalid option values by exiting; report it as
+                # an ordinary validation error instead of losing the receipt.
+                code = exc.code if isinstance(exc.code, int) else 2
     finally:
         sys.stdin = previous
         subprocess.run = original_run
@@ -277,6 +282,50 @@ def visualize(journal, data):
     return {'code': 0, 'stdout': '\n'.join('[[image: ' + p + ']]' for p in images), 'stderr': '', 'images': images}
 
 
+def amend_action(journal, data, mode, delete_token):
+    """Replace exactly one transaction: delete it and ingest the correction
+    under a single authorization; a failed ingest restores the deletion."""
+    strict_object(data, {'filter', 'defaults', 'transactions'})
+    selector = data.get('filter')
+    strict_object(selector, FILTERS, 'filter')
+    if not selector:
+        raise ValueError('amend needs a filter matching exactly one existing transaction')
+    payload = {k: v for k, v in data.items() if k in {'defaults', 'transactions'}}
+    if not isinstance(payload.get('transactions'), list) or not payload['transactions']:
+        raise ValueError('amend needs the complete corrected replacement transaction(s)')
+    delete_args = command_args('delete', selector)
+    if mode == 'preview':
+        found = invoke(journal, delete_args)
+        if found['code'] != 3:
+            return found
+        count = re.search(r'Delete candidates: (\d+)', found['stdout'])
+        if not count or count.group(1) != '1':
+            raise ValueError(f"amend filter must match exactly one transaction (matched {count.group(1) if count else '?'}); narrow it")
+        token = re.search(r'Confirmation token: ([a-f0-9]{16})', found['stdout'])
+        if not token:
+            raise ValueError('Missing backend deletion token')
+        added = invoke(journal, ['ingest-json', '-', '--preview'], payload)
+        if added['code']:
+            return added
+        if re.search(r'Records ready: 0\b', added['stdout'] + added['stderr']):
+            raise ValueError('amend replacement would not be written (duplicate of an existing entry)')
+        return {'code': 0, 'stdout': 'REMOVE:\n' + found['stdout'] + '\nADD:\n' + added['stdout'],
+                'stderr': added['stderr'], 'delete_token': token.group(1)}
+    if not delete_token or not re.fullmatch(r'[a-f0-9]{16}', delete_token):
+        raise ValueError('Host deletion token required')
+    removed = invoke(journal, delete_args + ['--confirm', delete_token])
+    if removed['code']:
+        return removed
+    added = invoke(journal, ['ingest-json', '-'], payload)
+    if added['code'] == 0 and re.search(r'Records ready: 0\b', added['stdout'] + added['stderr']):
+        added = {**added, 'code': 1, 'stderr': added['stderr'] + '\nReplacement was skipped as a duplicate.'}
+    if added['code']:
+        restored = undo_action(journal, 'execute')
+        return {'code': added['code'] or 1, 'stdout': added['stdout'],
+                'stderr': added['stderr'] + '\nReplacement failed; deletion undone: ' + restored.get('stdout', '') + restored.get('stderr', '')}
+    return {'code': 0, 'stdout': 'REMOVED:\n' + removed['stdout'] + '\nADDED:\n' + added['stdout'], 'stderr': added['stderr']}
+
+
 def run(journal, request, *, mode='preview', expected_snapshot=None, delete_token=None):
     strict_object(request, {'operation', 'data'})
     operation, data = request.get('operation'), request.get('data')
@@ -300,6 +349,8 @@ def run(journal, request, *, mode='preview', expected_snapshot=None, delete_toke
                 result = invoke(journal, args, payload)
                 if operation == 'historical':
                     result['stderr'] += '\nIsolated trial and strict audit passed; source count/totals reconciled to proposed records.'
+            elif operation == 'amend':
+                result = amend_action(journal, data, mode, delete_token)
             elif operation == 'settings':
                 strict_object(data, set())
                 values = {}

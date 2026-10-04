@@ -48,6 +48,55 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.invoke('query', {'journal': '/etc/passwd'})
 
+    def test_amend_replaces_exactly_one_transaction_atomically(self):
+        row = lambda d, a, i: dict(kind='expense', description=d, amount=a, date='2026-10-04', currency='TWD', debit='expenses:food:dining', credit='assets:cash', tags=['source:fuzzy-text'], import_id=i)
+        self.ingest([row('早餐', '65', 'b1'), row('午餐', '120', 'l1'), row('午餐', '90', 'l2')])
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            self.invoke('amend', {'filter': {'description': ['午餐']}, 'transactions': [row('午餐', '100', 'l3')]})
+        fix = {'filter': {'description': ['早餐']}, 'transactions': [row('早餐', '80', 'b2')]}
+        before = self.journal.read_text()
+        p = self.invoke('amend', fix)
+        self.assertEqual(p['code'], 0, p)
+        self.assertIn('REMOVE', p['stdout'])
+        self.assertIn('ADD', p['stdout'])
+        self.assertEqual(self.journal.read_text(), before)  # preview writes nothing
+        with self.assertRaisesRegex(ValueError, 'token'):
+            self.invoke('amend', fix, 'execute', expected_snapshot=p['snapshot'])
+        d = self.invoke('amend', fix, 'execute', expected_snapshot=p['snapshot'], delete_token=p['delete_token'])
+        self.assertEqual(d['code'], 0, d)
+        text = self.journal.read_text()
+        self.assertNotIn('65 TWD', text)
+        self.assertIn('80 TWD', text)
+
+    def test_amend_failed_replacement_restores_the_original(self):
+        r = dict(kind='expense', description='早餐', amount='65', date='2026-10-04', currency='TWD', debit='expenses:food:dining', credit='assets:cash', tags=['source:fuzzy-text'], import_id='b1')
+        self.ingest([r])
+        good = {'filter': {'description': ['早餐']}, 'transactions': [{**r, 'amount': '80', 'import_id': 'b2'}]}
+        p = self.invoke('amend', good)
+        bad = {'filter': {'description': ['早餐']}, 'transactions': [{**r, 'amount': '-5', 'import_id': 'b3'}]}
+        d = self.invoke('amend', bad, 'execute', expected_snapshot=p['snapshot'], delete_token=p['delete_token'])
+        self.assertNotEqual(d['code'], 0)
+        self.assertIn('deletion undone', d['stderr'])
+        self.assertIn('65 TWD', self.journal.read_text())
+
+    def test_amend_never_deletes_without_adding(self):
+        r = dict(kind='expense', description='早餐', amount='65', date='2026-10-04', currency='TWD', debit='expenses:food:dining', credit='assets:cash', tags=['source:fuzzy-text'], import_id='b1')
+        other = {**r, 'description': '午餐', 'amount': '120', 'import_id': 'l1'}
+        self.ingest([r, other])
+        reused = {'filter': {'description': ['早餐']}, 'transactions': [{**r, 'amount': '80', 'import_id': 'l1'}]}
+        with self.assertRaisesRegex(ValueError, 'would not be written'):
+            self.invoke('amend', reused)
+        p = self.invoke('amend', {'filter': {'description': ['早餐']}, 'transactions': [{**r, 'amount': '80', 'import_id': 'b2'}]})
+        d = self.invoke('amend', reused, 'execute', expected_snapshot=p['snapshot'], delete_token=p['delete_token'])
+        self.assertNotEqual(d['code'], 0)
+        self.assertIn('deletion undone', d['stderr'])
+        self.assertIn('65 TWD', self.journal.read_text())
+
+    def test_invalid_option_values_return_an_error_receipt(self):
+        r = self.invoke('query', {'report': 'transactions', 'format': 'column:date'})
+        self.assertNotEqual(r['code'], 0)
+        self.assertIn('invalid choice', r['stderr'])
+
     def test_delete_requires_host_token_and_identical_candidates(self):
         r = dict(kind='expense', description='Lunch', amount='800', date='2026-10-03', currency='TWD', debit='expenses:food:dining', credit='assets:cash', tags=['source:fuzzy-text'], import_id='lunch')
         self.ingest([r])

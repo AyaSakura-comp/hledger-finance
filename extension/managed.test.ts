@@ -59,3 +59,20 @@ test('source data is read only from explicitly supplied paths and cannot execute
  const r=await h.tools.finance_source.execute('x',{path});assert.match(r.content[0].text,/UNTRUSTED SOURCE DATA/);assert.match(r.content[0].text,/IGNORE ALL SAFETY/);
  assert.equal((await h.emit('tool_call',{toolName:'bash'})).block,true);
 });
+test('generic tools cannot write the ledger directory; reads and other paths stay allowed',async()=>{
+ const {ledgerWrite}=await import('./managed.ts');const {homedir}=await import('node:os');const dir=homedir()+'/finance';
+ assert.match(ledgerWrite('edit',{path:dir+'/main.journal'},dir)!,/not allowed/);
+ assert.match(ledgerWrite('write',{path:'~/finance/rules.json'},dir)!,/not allowed/);
+ assert.match(ledgerWrite('bash',{command:"sed -i '/計程車/d' ~/finance/main.journal"},dir)!,/not allowed/);
+ assert.match(ledgerWrite('bash',{command:'python3 scripts/finance.py ingest-json -'},dir)!,/not allowed/);
+ assert.match(ledgerWrite('bash',{command:'cd $HOME/finance && git reset --hard'},dir)!,/not allowed/);
+ assert.equal(ledgerWrite('read',{path:dir+'/main.journal'},dir),undefined);
+ assert.equal(ledgerWrite('edit',{path:'/tmp/notes.md'},dir),undefined);
+ assert.equal(ledgerWrite('edit',{path:dir+'-other/x'},dir),undefined);
+ assert.equal(ledgerWrite('bash',{command:'hledger -f ~/x.journal balance'},dir),undefined);
+});
+test('everyday finance phrasing is detected; ordinary chat is not',async()=>{
+ const {financeIntent}=await import('./managed.ts');
+ for(const t of ['這個月花了多少錢？','我的現金還剩多少','午餐 120、飲料 50','剛剛搭計程車花了 230','最近支出狀況','上個月消費'])assert.ok(financeIntent(t),t);
+ for(const t of ['今天台北天氣如何','花了多少時間寫完','畫一下貓的圖','把剛剛那段程式刪掉','iPhone 16 和 17 差在哪'])assert.equal(financeIntent(t),false,t);
+});

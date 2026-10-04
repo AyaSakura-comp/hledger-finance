@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Workflow, parseData } from './workflows.ts';
+import { Workflow, parseData, formatStats } from './workflows.ts';
 import { fileStore } from './pending-store.ts';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -180,4 +180,70 @@ test('a receipt source cannot be booked as total plus line items unless the user
  await assert.rejects(w.propose({operation:'ingest',data:{transactions:rows}}),/One receipt is one payment/);
  const x=W(async()=>preview,()=>'2026-10-04');x.begin('這張收據請逐項拆開記','image','r2');
  await x.propose({operation:'ingest',data:{transactions:rows}});assert.equal(x.state,'awaiting_confirmation');
+});
+test('amend previews removal and replacement under one token and validates the new row',async()=>{
+ const calls:any[]=[];const w=W(async(r:any,o:any)=>{calls.push(structuredClone({r,o}));return o.mode==='preview'?{...preview,delete_token:'0123456789abcdef'}:{code:0,stdout:'REMOVED ADDED',stderr:''};},()=>'2026-10-04');
+ w.begin('幫我把早餐改成 80');
+ await assert.rejects(w.propose({operation:'amend',data:{filter:{description:['早餐']},transactions:[{kind:'expense',description:'早餐',amount:'80',debit:'expenses:Breakfast',credit:'assets:cash'}]}}),/Unknown expense account/);
+ const x=W(async(r:any,o:any)=>{calls.push(structuredClone({r,o}));return o.mode==='preview'?{...preview,delete_token:'0123456789abcdef'}:{code:0,stdout:'REMOVED ADDED',stderr:''};},()=>'2026-10-04');
+ x.begin('幫我把早餐改成 80');
+ await x.propose({operation:'amend',data:{filter:{description:['早餐']},transactions:[{kind:'expense',description:'早餐',amount:'80',debit:'expenses:food:dining',credit:'assets:cash'}]}});
+ const r=await x.confirm('確認 '+x.confirmation);assert.match(r!.text,/REMOVED ADDED/);
+ assert.equal(calls.at(-1).o.delete_token,'0123456789abcdef');assert.equal(calls.at(-1).r.data.transactions[0].amount,'80');
+});
+test('stats are summarised readably with exact figures',()=>{
+ const t=formatStats(JSON.stringify({transaction_count:3,currencies:{TWD:{income:'0',expense:'-1495',net:'-1495'}},income_categories:{},expense_categories:{'expenses:food:dining':{TWD:'-65'},'expenses:transport:driving':{TWD:'-1200'}},period:{begin:'2026-10-01',end_exclusive:'2026-11-01'}}))!;
+ assert.match(t,/2026-10-01 ～ 2026-10-31，共 3 筆/);assert.match(t,/TWD：收入 0｜支出 1495｜淨額 -1495/);
+ assert.ok(t.indexOf('driving')<t.indexOf('dining'));assert.equal(formatStats('not json'),undefined);
+});
+test('operation hints route spending totals to stats and balances to query',async()=>{
+ const {operationHint}=await import('./workflow-schema.ts');
+ assert.equal(operationHint('這個月花了多少錢？'),'stats');assert.equal(operationHint('我的現金還剩多少錢'),'query');
+ assert.equal(operationHint('幫我把早餐改成 80'),'amend');assert.equal(operationHint('修改分類規則：全聯一律 groceries'),'rules');assert.equal(operationHint('把剛剛計程車那筆刪掉'),'delete');
+});
+test('text sources never keep model import ids; previews that write nothing get no token',async()=>{
+ const calls:any[]=[];const dup={code:0,stdout:'',stderr:'Records ready: 0; duplicates skipped: 1',snapshot:'s',delete_token:'0123456789abcdef'};
+ const w=W(async(r:any)=>{calls.push(structuredClone(r));return dup;},()=>'2026-10-04');w.begin('幫我把早餐改成 80');
+ await assert.rejects(w.propose({operation:'amend',data:{filter:{description:['早餐']},transactions:[{kind:'expense',description:'早餐',amount:'80',debit:'expenses:food:dining',credit:'assets:cash',import_id:'flow-old-0'}]}}),/would not be written/);
+ assert.notEqual(calls.at(-1).data.transactions[0].import_id,'flow-old-0');assert.equal(w.confirmation,undefined);
+ const x=W(async()=>dup,()=>'2026-10-04');x.begin('午餐 120 元 再記一次');
+ const r=await x.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐',amount:'120',debit:'expenses:food:dining',credit:'assets:cash'}]}});
+ assert.match(r.text,/沒有新增/);assert.equal(x.state,'done');assert.equal(x.confirmation,undefined);
+ const csv=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-04');csv.begin('匯入 /tmp/a.csv','file');
+ await csv.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'x',amount:'1',debit:'expenses:shopping',credit:'assets:cash',import_id:'bank-row-17'}]}});
+ assert.equal(calls.at(-1).data.transactions[0].import_id,'bank-row-17');
+});
+test('presentation options are normalized, not fatal',async()=>{
+ const calls:any[]=[];const w=W(async(r:any)=>{calls.push(structuredClone(r));return {code:0,stdout:'ok',stderr:''};},()=>'2026-10-04');w.begin('現金還剩多少');
+ await w.propose({operation:'query',data:{report:'balance',account:['assets:cash'],interval:'month',format:'table'}});
+ assert.deepEqual(calls[0].data,{report:'balance',account:['assets:cash'],interval:'monthly'});
+});
+test('operation hints do not trip on words inside ordinary requests',async()=>{
+ const {operationHint}=await import('./workflow-schema.ts');
+ assert.equal(operationHint('今天午餐1200 JPY，從assets:bank:jpy付款。記帳，不得改成台幣或現金。'),'ingest');
+ assert.equal(operationHint('期初現金1000元，debit assets:cash、credit equity:opening-balances。'),'ingest');
+ assert.equal(operationHint('把整份測試帳本含Git歷史及規則備份到qa:'),'backup');
+ assert.equal(operationHint('新增未來分類規則：「毛孩市集」一律expenses:pets:supplies。'),'rules');
+ assert.equal(operationHint('早餐那筆金額改成 80'),'amend');
+});
+test('explicit debit/credit pairs from the user must appear in the proposal',async()=>{
+ const w=W(async()=>preview,()=>'2026-10-04');w.begin('午餐退款20元，debit assets:cash、credit expenses:food:dining');
+ await assert.rejects(w.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐退款',amount:'20',debit:'expenses:food:dining',credit:'assets:cash'}]}}),/explicitly specified debit assets:cash/);
+ const x=W(async()=>preview,()=>'2026-10-04');x.begin('午餐退款20元，debit assets:cash、credit expenses:food:dining');
+ await x.propose({operation:'ingest',data:{transactions:[{kind:'refund',description:'午餐退款',amount:'20',debit:'assets:cash',credit:'expenses:food:dining'}]}});assert.equal(x.state,'awaiting_confirmation');
+});
+test('explicitly stated sides are never auto-flipped even when the kind is wrong',async()=>{
+ const calls:any[]=[];const w=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-04');w.begin('午餐退款20元，debit assets:cash、credit expenses:food:dining');
+ await w.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐退款',amount:'20',debit:'assets:cash',credit:'expenses:food:dining'}]}});
+ const row=calls.find(c=>c.operation==='ingest').data.transactions[0];assert.equal(row.debit,'assets:cash');assert.equal(row.credit,'expenses:food:dining');
+});
+test('a currency named by the user is never replaced by the TWD default',async()=>{
+ const calls:any[]=[];const w=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-04');w.begin('今天午餐1200 JPY，從assets:bank:jpy付款');
+ await w.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐',amount:'1200',debit:'expenses:food:dining',credit:'assets:bank:jpy'}]}});
+ assert.equal(calls.find(c=>c.operation==='ingest').data.defaults.currency,'JPY');
+ const x=W(async()=>preview,()=>'2026-10-04');x.begin('午餐 10 USD、晚餐 1200 日圓');
+ await assert.rejects(x.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐',amount:'10',debit:'expenses:food:dining',credit:'assets:cash'}]}}),/several currencies/);
+ const y=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-04');y.begin('午餐 150 元');
+ await y.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'午餐',amount:'150',debit:'expenses:food:dining',credit:'assets:cash'}]}});
+ assert.equal(calls.at(-1).data.defaults.currency,'TWD');
 });
