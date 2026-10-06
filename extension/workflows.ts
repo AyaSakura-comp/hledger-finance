@@ -14,7 +14,7 @@ export type Receipt={text:string;state:WorkflowState};
 export class Workflow {
  state:WorkflowState='idle';
  private pending?:{request:Request;reply:Reply;token:string;expires:number};
- private inspecting=0;session='';autoCommit=false;private repairable=false;private input='';private id='';private source:'text'|'image'|'file'|'pdf'='text';
+ private inspecting=0;session='';autoCommit=false;lastWritten?:Request;private repairable=false;private input='';private id='';private source:'text'|'image'|'file'|'pdf'='text';
  constructor(private bridge:Bridge,private today:()=>string=localDate,private clock:()=>number=Date.now,private store?:PendingStore,private journal=''){}
  get confirmation(){return this.pending?.token;}
  begin(input:string,source:'text'|'image'|'file'|'pdf'='text',stableSourceDigest?:string){
@@ -105,6 +105,11 @@ export class Workflow {
    const named=[...new Set([...this.input.normalize('NFKC').toUpperCase().matchAll(/\b(USD|JPY|EUR|CNY|HKD|GBP|KRW|SGD|AUD|CAD|THB|TWD)\b|(美元|美金)|(日圓|日幣|日元)|(人民幣)|(港幣)|(歐元)/g)].map(m=>m[1]??(m[2]?'USD':m[3]?'JPY':m[4]?'CNY':m[5]?'HKD':'EUR')))].filter(c=>c!=='TWD');
    const fallback=named.length===1?named[0]:named.length?undefined:'TWD';
    if(!defaults.currency&&!fallback&&request.data.transactions.some((r:any)=>!r.currency))throw new Error(`The user mentioned several currencies (${named.join(', ')}); give every row an explicit currency`);
+   // Dates are user facts: for typed requests that state no date, every row is
+   // today (the model once read "1015高鐵" as both 1015 TWD and October 15).
+   if(this.source==='text'&&!/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}\/\d{1,2}|\d{1,2}月\d{1,2}[日號]?|今天|昨天|前天|大前天|上週|上星期|上禮拜|週[一二三四五六日天]|星期[一二三四五六日天]|禮拜[一二三四五六日天]/.test(this.input)){
+    delete defaults.date;for(const r of request.data.transactions)delete r.date;
+   }
    request.data.defaults={...defaults,date:defaults.date??this.today(),currency:defaults.currency??fallback};
    request.data.transactions=request.data.transactions.map((row:any,index:number)=>{
     const r={...row};
@@ -154,7 +159,7 @@ export class Workflow {
    // installments and loans still require a confirmation.
    if(this.autoCommit&&request.operation==='ingest'&&this.source==='text'&&request.data.transactions.length<=10&&request.data.transactions.every((r:any)=>['expense','income'].includes(r.kind??request.data.defaults?.kind))){
     this.state='executing';
-    try{const output=await this.bridge(request,{mode:'execute',expected_snapshot:reply.snapshot,signal});this.state=output.code===0?'done':'failed';
+    try{const output=await this.bridge(request,{mode:'execute',expected_snapshot:reply.snapshot,signal});this.state=output.code===0?'done':'failed';if(output.code===0)this.lastWritten=request;
      return {text:output.code===0?doneText(request,output,reply):'未確認成功；已停止，請先查帳，不要自動重試：\n'+this.boundOutput(output),state:this.state};}
     catch(error){this.state='failed';return {text:`結果不確定，已停止且不自動重試：${String(error)}`,state:this.state};}
    }
@@ -192,7 +197,7 @@ export class Workflow {
   const {request,reply}=authorized;this.pending=undefined;this.repairable=false;this.state='executing';
   try{
    const output=await this.bridge(request,{mode:'execute',expected_snapshot:reply.snapshot,delete_token:reply.delete_token,signal});
-   this.state=output.code===0?'done':'failed';
+   this.state=output.code===0?'done':'failed';if(output.code===0&&request.operation==='ingest')this.lastWritten=request;
    return {text:output.code===0?doneText(request,output):'未確認成功；已停止，請先查帳，不要自動重試：\n'+this.boundOutput(output),state:this.state};
   }catch(error){this.state='failed';return {text:`結果不確定，已停止且不自動重試：${String(error)}`,state:this.state};}
  }

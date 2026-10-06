@@ -145,6 +145,7 @@ const PAYMENT=/^(?:用|以)?(信用卡|刷卡|LINE ?Pay|街口(?:支付)?|全支
 export function parseEntries(raw:string,today:string):Entry[]|null{
  if(!validDate(today))throw new Error('Invalid host date');
  let text=raw.normalize('NFKC').trim();
+ const prefixed=/^(?:【記帳】|\[記帳\]|記帳)/.test(text);
  text=text.replace(/^(?:【記帳】|\[記帳\]|記帳[:：]?|\/finance\s+)\s*/,'').replace(/^(?:請)?(?:幫我)?(?:記帳|記一下|記一筆|記個帳)[，,、:：\s]*/,'').trim();
  // Anything that needs judgement or confirmation stays on the guarded workflow.
  if(/\b(?:example|sample|budget|hypothetical|estimated?|approximately|if|refund|transfer|tomorrow)\b/i.test(text))return null;
@@ -157,7 +158,8 @@ export function parseEntries(raw:string,today:string):Entry[]|null{
  const segments=text.split(/[、，,；;\n]+/).map(s=>s.trim()).filter(Boolean);
  if(!segments.length||segments.length>10)return null;
  const tail=new RegExp(`^(.+?)\\s*(${NUM})\\s*(${UNIT})?\\s*(?:入帳|收入)?$`,'i');
- const head=new RegExp(`^(${NUM})\\s*(?:(${UNIT})\\s*|\\s+)(.+)$`,'i');
+ // "300 洗車" / "300元洗車"; with an explicit 【記帳】 prefix also "1015高鐵".
+ const head=new RegExp(`^(${NUM})\\s*(?:(${UNIT})\\s*|\\s+${prefixed?'|(?=\\p{L})':''})(.+)$`,'iu');
  const out:Entry[]=[];
  for(const seg of segments){
   const a=seg.match(tail),b=a?null:seg.match(head);
@@ -177,7 +179,7 @@ export function parseEntries(raw:string,today:string):Entry[]|null{
 }
 const DEFAULT_INCOME=['income:salary','income:bonus','income:interest','income:investment','income:gifts','income:other'];
 export class FinanceBatch{
- state:State='idle';entries:Entry[]=[];evidence:Evidence[]=[];incomeAccounts:string[]=[];paymentAccounts:string[]=[];importId='';
+ state:State='idle';entries:Entry[]=[];evidence:Evidence[]=[];written?:any[];incomeAccounts:string[]=[];paymentAccounts:string[]=[];importId='';
  readonly trace:State[]=['idle'];
  constructor(private backend:Backend,private accounts:()=>Promise<string[]>,private onState:(s:State)=>void=()=>{},private paymentRules:()=>Promise<Record<string,string>>=async()=>({})){}
  private routes:Record<string,string>={};
@@ -229,7 +231,7 @@ export class FinanceBatch{
   try{
    const output=await this.backend(['ingest-json','-'],{transactions:rows});
    if(!/Records ready: \d+; duplicates skipped: \d+/.test(output))throw new Error('Unrecognized write receipt; inspect journal before retrying');
-   this.move('done');
+   this.move('done');this.written=rows;
    const lines=rows.map(r=>`・${r.date} ${r.description} ${r.amount} ${r.currency}｜${r.kind==='expense'?r.debit:r.credit}${(r as any).credit&&r.kind==='expense'?'｜'+(r as any).credit:''}${(r as any).debit&&r.kind==='income'?'｜'+(r as any).debit:''}`);
    const dup=/Records ready: 0;/.test(output);
    const unmapped=this.entries.filter((e,i)=>e.payment&&!(choices[i].payment&&this.paymentAccounts.includes(choices[i].payment!))).map(e=>e.payment);
@@ -240,3 +242,6 @@ export class FinanceBatch{
 export function hledgerAccounts(journal:string):()=>Promise<string[]>{
  return ()=>new Promise(ok=>{const c=spawn('hledger',['-f',journal,'accounts'],{stdio:['ignore','pipe','ignore']});let out='';const t=setTimeout(()=>{c.kill();ok([]);},10000);c.stdout.on('data',d=>out+=d);c.on('close',()=>{clearTimeout(t);ok(out.split('\n').map(s=>s.trim()).filter(Boolean));});c.on('error',()=>{clearTimeout(t);ok([]);});});
 }
+
+// "多一筆 / 再一筆 / 再記一次" right after a record means the same entries again.
+export function isRepeatRequest(text:string):boolean{return /^(?:再|多)(?:記)?(?:一|1)筆(?:一樣的?|同樣的?)?[。!！]*$|^(?:同樣|一樣)(?:的)?再(?:記)?一(?:次|筆)[。!！]*$|^再記一次[。!！]*$/.test(text.trim());}

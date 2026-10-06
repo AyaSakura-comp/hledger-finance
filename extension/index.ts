@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { FinanceBatch, parseEntries, hledgerAccounts, localDate, pythonBackend, requireToolCall, userMessage, type Backend } from './core.ts';
+import { FinanceBatch, parseEntries, hledgerAccounts, localDate, pythonBackend, requireToolCall, userMessage, isRepeatRequest, type Backend } from './core.ts';
 import { registerManaged } from './managed.ts';
 import type { Bridge } from './workflows.ts';
 
@@ -14,7 +14,7 @@ export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;
   let savedTools:string[]|undefined;
   const journal=options.journal??process.env.PI_FINANCE_JOURNAL??join(homedir(),'finance/main.journal');
   const backend=options.backend??pythonBackend({journal});
-  const recent={at:0};
+  const recent:{at:number;rows?:any[]}={at:0};
   const accounts=options.accounts??hledgerAccounts(journal);
   const paymentRules=async()=>{try{return (JSON.parse(await readFile(join(dirname(journal),'payment-account-rules.json'),'utf8')).currency_accounts??{}) as Record<string,string>;}catch{return {};}};
   registerManaged(pi,{journal,bridge:options.bridge,today:options.today,busy:()=>Boolean(flow),stateDir:options.stateDir,recent});
@@ -25,6 +25,18 @@ export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;
    if(flow){report('已有記帳流程準備中；本次輸入未寫入，請等待回執後重新提出。');return {action:'handled'};}
    const today=(options.today??localDate)();
    const text=userMessage(event.text);
+   // "多一筆" right after a record: the host repeats exactly those entries
+   // (today's date, new import ids) instead of asking the model what was meant.
+   if(isRepeatRequest(text)&&recent.rows?.length&&Date.now()-recent.at<15*60000){
+    const rows=recent.rows.map((r,i)=>({...r,date:today,import_id:`pi-repeat-${randomUUID()}-${i}`,tags:(r.tags??[]).filter((t:string)=>!t.startsWith('inferred:date'))}));
+    try{
+     const out=await backend(['ingest-json','-'],{transactions:rows});
+     if(!/Records ready: [1-9]/.test(out))throw new Error(out.split('\n').pop()??'not written');
+     recent.at=Date.now();recent.rows=rows;
+     report(`已再記一筆：\n${rows.map(r=>`・${r.date} ${r.description} ${r.amount} ${r.currency??'TWD'}｜${r.kind==='income'?r.credit:r.debit}`).join('\n')}\n要撤銷請說「撤銷」。`);
+    }catch(error){report('沒有再記：'+String(error).replace(/^Error:\s*/,'').slice(0,120));}
+    return {action:'handled'};
+   }
    // An amount with unconverted Zhuyin would otherwise reach the general model.
    if(!event.images?.length&&/\d/.test(text)&&/[\u3100-\u312F\u31A0-\u31BFˊˇˋ˙]/.test(text)){report('看起來有注音沒有選字（例如「ㄒㄧ ㄔㄜˋ」），沒有記帳。請改成國字後重新輸入，例如「300 洗車」。');return {action:'handled'};}
    if(event.images?.length||!parseEntries(text,today))return;
@@ -61,7 +73,7 @@ export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;
     try{
      if(!choices)throw new Error('Provide entries: one category per entry, in order');
      const text=await flow.commit(choices!);
-     recent.at=Date.now();
+     recent.at=Date.now();recent.rows=flow.written;
      const shown=text.split('\n').filter(l=>!/^\[master|^\s+\d+ file|^Appended to|^Record \d|^Records ready/.test(l)).join('\n');
      report(shown);
      return {content:[{type:'text',text:shown.slice(0,12000)}],details:details(),terminate:true};

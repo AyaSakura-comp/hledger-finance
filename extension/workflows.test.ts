@@ -265,3 +265,11 @@ test('short confirmations and compact postings',()=>{
  for(const t of ['確認一下這筆是什麼','好像不對','ok google'])assert.equal(isShortConfirm(t),false,t);
  assert.equal(postingLines('2026-10-04 洗車 [1/1]\n    ; kind:expense\n    expenses:transport:vehicle         300 TWD\n    assets:cash:wallet                -300 TWD\n'),'・2026-10-04 洗車 300 TWD｜expenses:transport:vehicle｜assets:cash:wallet');
 });
+test('typed requests that state no date are always recorded today',async()=>{
+ const calls:any[]=[];const w=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-05');w.begin('【記帳】1015高鐵');
+ await w.propose({operation:'ingest',data:{defaults:{date:'2026-10-15'},transactions:[{kind:'expense',description:'高鐵',amount:'1015',date:'2026-10-15',debit:'expenses:shopping'}]}});
+ const d=calls.find(c=>c.operation==='ingest').data;assert.equal(d.defaults.date,'2026-10-05');assert.equal(d.transactions[0].date,undefined);
+ const x=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-05');x.begin('昨天高鐵 1015 元');
+ await x.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'高鐵',amount:'1015',date:'2026-10-04',debit:'expenses:shopping'}]}});
+ assert.equal(calls.at(-1).data.transactions[0].date,'2026-10-04');
+});

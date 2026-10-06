@@ -101,3 +101,10 @@ test('unconverted Zhuyin is never accepted as an item name',async()=>{
  assert.equal(parseEntries(userMessage('【記帳】300 ㄒㄧ ㄔㄜˋ'),'2026-10-04'),null);
  assert.equal(parseEntries('300 洗車','2026-10-04')?.[0].description,'洗車');
 });
+test('explicit 【記帳】 allows an amount glued to the item; repeat requests are recognised',async()=>{
+ const {parseEntries,isRepeatRequest}=await import('./core.ts');
+ const e=parseEntries('【記帳】1015高鐵','2026-10-05');assert.equal(e?.[0].amount,'1015');assert.equal(e?.[0].date,'2026-10-05');assert.equal(e?.[0].description,'高鐵');
+ assert.equal(parseEntries('1015高鐵','2026-10-05'),null);
+ for(const t of ['多一筆','再一筆','再記一次','一樣再一筆'])assert.ok(isRepeatRequest(t),t);
+ for(const t of ['多一筆午餐 120','再一筆是什麼'])assert.equal(isRepeatRequest(t),false,t);
+});
