@@ -1,0 +1,166 @@
+{
+  "model": "qwen3.6-35b-q4",
+  "provider": "local-llama",
+  "thinking": "minimal (in-memory harness only; existing service/config unchanged)",
+  "productionUnchanged": true,
+  "results": [
+    {
+      "case": 0,
+      "text": "午餐120元",
+      "decisions": "agent",
+      "seconds": 1.521693926,
+      "correct": true,
+      "timeout": false,
+      "error": "",
+      "toolCalls": [
+        "finance_finish"
+      ],
+      "transactions": 1
+    },
+    {
+      "case": 0,
+      "text": "午餐120元",
+      "decisions": "laya",
+      "seconds": 4.420785155000001,
+      "correct": false,
+      "timeout": false,
+      "error": "",
+      "toolCalls": [
+        "finance_handoff"
+      ],
+      "transactions": 0
+    },
+    {
+      "case": 1,
+      "text": "補習班學費8000元",
+      "decisions": "laya",
+      "seconds": 11.719632535,
+      "correct": false,
+      "timeout": false,
+      "error": "",
+      "toolCalls": [
+        "finance_handoff"
+      ],
+      "transactions": 0
+    },
+    {
+      "case": 1,
+      "text": "補習班學費8000元",
+      "decisions": "agent",
+      "seconds": 1.4666107450000019,
+      "correct": true,
+      "timeout": false,
+      "error": "",
+      "toolCalls": [
+        "finance_finish"
+      ],
+      "transactions": 1
+    },
+    {
+      "case": 2,
+      "text": "房租15000元",
+      "decisions": "agent",
+      "seconds": 1.4854218149999978,
+      "correct": true,
+      "timeout": false,
+      "error": "",
+      "toolCalls": [
+        "finance_finish"
+      ],
+      "transactions": 1
+    },
+    {
+      "case": 2,
+      "text": "房租15000元",
+      "decisions": "laya",
+      "seconds": 8.10913865,
+      "correct": false,
+      "timeout": false,
+      "error": "",
+      "toolCalls": [
+        "finance_handoff"
+      ],
+      "transactions": 0
+    },
+    {
+      "case": 3,
+      "text": "今天收到薪水50000元",
+      "decisions": "laya",
+      "seconds": 9.338497861,
+      "correct": false,
+      "timeout": false,
+      "error": "",
+      "toolCalls": [
+        "finance_handoff"
+      ],
+      "transactions": 0
+    },
+    {
+      "case": 3,
+      "text": "今天收到薪水50000元",
+      "decisions": "agent",
+      "seconds": 1.1479849830000022,
+      "correct": true,
+      "timeout": false,
+      "error": "",
+      "toolCalls": [
+        "finance_finish"
+      ],
+      "transactions": 1
+    },
+    {
+      "case": 4,
+      "text": "這個月我的現金還剩多少",
+      "decisions": "agent",
+      "seconds": 5.783944744,
+      "correct": true,
+      "timeout": false,
+      "error": "",
+      "toolCalls": [
+        "finance_inspect",
+        "finance_action"
+      ],
+      "transactions": 2
+    },
+    {
+      "case": 4,
+      "text": "這個月我的現金還剩多少",
+      "decisions": "laya",
+      "seconds": 7.284199023000001,
+      "correct": false,
+      "timeout": false,
+      "error": "",
+      "toolCalls": [
+        "finance_handoff"
+      ],
+      "transactions": 2
+    },
+    {
+      "case": 5,
+      "text": "多一筆",
+      "decisions": "laya",
+      "seconds": 7.649430846999996,
+      "correct": true,
+      "timeout": false,
+      "error": "",
+      "toolCalls": [
+        "finance_handoff"
+      ],
+      "transactions": 0
+    },
+    {
+      "case": 5,
+      "text": "多一筆",
+      "decisions": "agent",
+      "seconds": 47.39911719799999,
+      "correct": false,
+      "timeout": true,
+      "error": "",
+      "toolCalls": [
+        "finance_handoff",
+        "finance_question"
+      ],
+      "transactions": 0
+    }
+  ]
+}

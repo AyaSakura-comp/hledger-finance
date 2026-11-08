@@ -1,0 +1,21 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {createFinanceExtension} from './index.ts';
+import type {Choice} from './laya.ts';
+import {mkdtempSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const d=(choice:string):Choice=>({choice,status:'match',confidence:1,margin:1,probabilities:{[choice]:1}});
+test('Laya mode exposes only handoff; agent cannot supply money/categories or bypass guarded backend',async()=>{
+ const hooks:Record<string,any[]>={},tools:any={},messages:any[]=[];let active=['read','bash'];let writes=0;
+ const pi:any={on:(n:string,f:any)=>(hooks[n]??=[]).push(f),registerTool:(t:any)=>tools[t.name]=t,getActiveTools:()=>active,setActiveTools:(t:string[])=>active=t,sendMessage:(m:any)=>messages.push(m)};
+ createFinanceExtension({decisions:'laya',stateDir:mkdtempSync(join(tmpdir(),'fin-laya-state-')),journal:'/tmp/laya-test-book/main.journal',today:()=> '2026-10-06',backend:async(a,p)=>{if(a[0]==='classify')return JSON.stringify({binding:false,suggestion:{account:'expenses:food:dining'},categories:[{account:'expenses:food:dining',description:'餐廳'}]});writes++;return 'Records ready: 1; duplicates skipped: 0';},accounts:async()=>[],judge:async(s,q)=>Object.fromEntries(Object.entries(q).map(([k,v])=>[k,d(k==='route'?'record':Object.keys(v.criteria)[0])]))})(pi);
+ assert.deepEqual(Object.keys(tools),['finance_handoff']);
+ assert.deepEqual(Object.keys(tools.finance_handoff.parameters.properties),['reason']);
+ const ctx:any={isIdle:()=>true,sessionManager:{getSessionId:()=> 'test'},cwd:'/tmp'};
+ await hooks.input[0]({text:'[Web user: web]\n午餐120',source:'interactive'},ctx);
+ const r=await tools.finance_handoff.execute('call',{reason:'record'},undefined,undefined,ctx);assert.equal(writes,1);assert.equal(r.terminate,true);assert.ok(messages.some(m=>m.content.includes('120')));
+ assert.equal((await tools.finance_handoff.execute('again',{},undefined,undefined,ctx)).terminate,true);assert.equal(writes,1);
+ assert.ok(hooks.tool_call[0]({toolName:'write',input:{path:'/tmp/laya-test-book/main.journal'}}).block);
+ await hooks.input[0]({text:'[Web user: web]\n午餐120',source:'interactive'},ctx);await tools.finance_handoff.execute('new',{},undefined,undefined,ctx);assert.equal(writes,2,'a genuinely new user turn can be another expense');
+});

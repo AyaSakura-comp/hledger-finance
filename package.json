@@ -5,7 +5,7 @@
   "description": "Experimental guarded finance state machines for pi (fast single expense + previewed workflows); not production-ready",
   "keywords": ["pi-package"],
   "pi": {
-    "extensions": ["./extension/index.ts"]
+    "extensions": ["./extension/channel.ts"]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

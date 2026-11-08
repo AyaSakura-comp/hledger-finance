@@ -1946,7 +1946,7 @@ class FuzzyIngestTests(unittest.TestCase):
                 _append_validated_and_commit(journal, addition, "test commit")
             self.assertEqual(journal.read_text(encoding="utf-8"), "; manually created\n")
 
-    def test_atomic_append_refuses_unstaged_manual_journal_edits(self):
+    def test_atomic_append_adopts_valid_manual_journal_edits_as_separate_commit(self):
         with tempfile.TemporaryDirectory() as tmp:
             book = Path(tmp)
             journal = book / "main.journal"
@@ -1958,9 +1958,18 @@ class FuzzyIngestTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(book), "commit", "-qm", "init"], check=True)
             journal.write_text("; original\n; manual edit\n", encoding="utf-8")
             addition = "2026-09-17 Dinner\n    expenses:food  100 TWD\n    assets:cash  -100 TWD\n\n"
-            with self.assertRaisesRegex(ValueError, "unstaged"):
-                _append_validated_and_commit(journal, addition, "test commit")
-            self.assertEqual(journal.read_text(encoding="utf-8"), "; original\n; manual edit\n")
+            _append_validated_and_commit(journal, addition, "test commit")
+            log = subprocess.run(["git", "-C", str(book), "log", "--format=%s"], capture_output=True, text=True, check=True).stdout.split("\n")
+            self.assertEqual(log[:3], ["test commit", "Adopt external journal edits", "init"])
+            self.assertIn("; manual edit", journal.read_text(encoding="utf-8"))
+            status = subprocess.run(["git", "-C", str(book), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout
+            self.assertEqual(status, "")
+            # An invalid hand edit is still refused and left untouched.
+            broken = journal.read_text(encoding="utf-8") + "2026-09-18 Bad\n    expenses:food  50 TWD\n    assets:cash  -40 TWD\n"
+            journal.write_text(broken, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "edited outside the finance tools"):
+                _append_validated_and_commit(journal, addition.replace("Dinner", "Supper"), "test commit 2")
+            self.assertEqual(journal.read_text(encoding="utf-8"), broken)
 
     def test_atomic_append_refuses_unrelated_staged_work(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -6246,3 +6255,22 @@ class CrossCurrencyTransferTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QueryWordsTest(unittest.TestCase):
+    def test_account_words_map_to_real_accounts(self):
+        self.assertEqual(finance.account_pattern("現金"), "assets:cash")
+        self.assertEqual(finance.account_pattern("美金帳戶"), "usd")
+        self.assertEqual(finance.account_pattern("assets:bank"), "assets:bank")
+
+    def test_currency_prefix_alias(self):
+        self.assertEqual(finance.normalize_query_terms(["currency:USD"]), ["cur:USD"])
+
+    def test_last_entries(self):
+        text = "2026-01-01 a\n    x  1\n    y\n\n2026-01-02 b\n    x  2\n    y\n\n2026-01-03 c\n    x  3\n    y\n"
+        self.assertEqual(finance.last_entries(text, "transactions", None, 2).count("2026-01-0"), 2)
+        self.assertIn("2026-01-03 c", finance.last_entries(text, "transactions", None, 1))
+
+    def test_bare_chinese_terms(self):
+        self.assertEqual(finance.normalize_query_terms(["吃飯"]), ["expenses:food"])
+        self.assertEqual(finance.normalize_query_terms(["全聯"]), ["desc:全聯"])

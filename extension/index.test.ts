@@ -27,7 +27,7 @@ test('route locks tools, blocks escape, terminates once and restores',async()=>{
 });
 test('aborted tool never writes; plain-text model reply gets a no-write notice',async()=>{
  let writes=0;const h=harness(async(args:string[])=>args[0]==='classify'?JSON.stringify(evidence):(writes++,'Records ready: 1; duplicates skipped: 0'));
- await h.hooks.input({text:'午餐150元',source:'interactive'},h.ctx);
+ await h.hooks.input({text:'【記帳】午餐150元',source:'interactive'},h.ctx);
  const controller=new AbortController();controller.abort();
  await h.tools.finance_finish.execute('call',{category:'expenses:food:dining'},controller.signal,undefined,h.ctx);
  assert.equal(writes,0);
@@ -36,14 +36,14 @@ test('aborted tool never writes; plain-text model reply gets a no-write notice',
 });
 test('prepare errors are handled without falling back to unguarded model',async()=>{
  const h=harness(async()=>{throw new Error('backend missing');});
- const result=await h.hooks.input({text:'午餐1500元',source:'interactive'},h.ctx);
+ const result=await h.hooks.input({text:'【記帳】午餐1500元',source:'interactive'},h.ctx);
  assert.equal(result.action,'handled');assert.deepEqual(h.active(),['read','bash']);assert.ok(h.messages[0].content.includes('backend missing'));
 });
 test('concurrent inputs cannot replace a preparing expense',async()=>{
  let release:any;let calls=0;
  const h=harness(async()=>{calls++;return new Promise<string>(ok=>release=ok);});
- const first=h.hooks.input({text:'午餐150元',source:'interactive'},h.ctx);
- const second=await h.hooks.input({text:'咖啡95元',source:'interactive'},h.ctx);
+ const first=h.hooks.input({text:'【記帳】午餐150元',source:'interactive'},h.ctx);
+ const second=await h.hooks.input({text:'【記帳】咖啡95元',source:'interactive'},h.ctx);
  assert.equal(second.action,'handled');assert.equal(calls,1);
  release(JSON.stringify(evidence));await first;
 });

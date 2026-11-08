@@ -37,7 +37,7 @@ test('delete backend token is never accepted as user authorization; subsets do n
 });
 test('single-flight, cancellation, failed writes and stale authorization never auto-retry',async()=>{
  let calls=0;const w=W(async(_r,o)=>{calls++;return o.mode==='preview'?preview:{...preview,code:1,stderr:'stale snapshot'};});
- w.begin('記帳');await w.propose(request);assert.throws(()=>w.begin('new'),/pending/);
+ w.begin('記帳');await w.propose(request);
  const token=w.confirmation;const r=await w.confirm('確認 '+token);assert.match(r!.text,/stale snapshot/);assert.equal(w.state,'failed');
  assert.equal(await w.confirm('確認 '+token),null);assert.equal(calls,2);
  w.begin('new');await w.propose(request);w.cancel();assert.equal(w.state,'cancelled');assert.equal(await w.confirm('確認 '+token),null);
@@ -148,11 +148,11 @@ test('cancel and expiry remove the persisted authorization',async()=>{
  const r=await W(bridge,()=>'2026-10-04',()=>now,fileStore('/j',dir),'/j').confirm('確認 '+t2);
  assert.match(r!.text,/過期/);assert.equal(executed,0);
 });
-test('invented expense accounts are rejected unless the user wrote them',async()=>{
- const calls:any[]=[];const w=W(async(r:any)=>{calls.push(r.operation);return preview;},()=>'2026-10-04');
+test('invented expense accounts become the closest catalog category unless the user wrote them',async()=>{
+ const calls:any[]=[];const w=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-04');
  w.begin('幫我記這張收據');
- await assert.rejects(w.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'全聯',amount:'460',debit:'expenses:Groceries',credit:'assets:cash'}]}}),/Unknown expense account expenses:groceries; choose exactly one of: .*expenses:food:groceries/);
- assert.deepEqual(calls,[]);
+ await w.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'全聯',amount:'460',debit:'expenses:Groceries',credit:'assets:cash'}]}});
+ assert.equal(calls.find(c=>c.operation==='ingest').data.transactions[0].debit,'expenses:food:groceries');
  const x=W(async()=>preview,()=>'2026-10-04');x.begin('毛孩市集 230 元，記到 expenses:pets:supplies');
  await x.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'毛孩市集',amount:'230',debit:'expenses:pets:supplies',credit:'assets:cash'}]}});
  assert.equal(x.state,'awaiting_confirmation');
@@ -184,7 +184,8 @@ test('a receipt source cannot be booked as total plus line items unless the user
 test('amend previews removal and replacement under one token and validates the new row',async()=>{
  const calls:any[]=[];const w=W(async(r:any,o:any)=>{calls.push(structuredClone({r,o}));return o.mode==='preview'?{...preview,delete_token:'0123456789abcdef'}:{code:0,stdout:'REMOVED ADDED',stderr:''};},()=>'2026-10-04');
  w.begin('幫我把早餐改成 80');
- await assert.rejects(w.propose({operation:'amend',data:{filter:{description:['早餐']},transactions:[{kind:'expense',description:'早餐',amount:'80',debit:'expenses:Breakfast',credit:'assets:cash'}]}}),/Unknown expense account/);
+ await w.propose({operation:'amend',data:{filter:{description:['早餐']},transactions:[{kind:'expense',description:'早餐',amount:'80',debit:'expenses:Breakfast',credit:'assets:cash'}]}});
+ assert.equal(calls.at(-1).r.data.transactions[0].debit,'expenses:uncategorized');
  const x=W(async(r:any,o:any)=>{calls.push(structuredClone({r,o}));return o.mode==='preview'?{...preview,delete_token:'0123456789abcdef'}:{code:0,stdout:'REMOVED ADDED',stderr:''};},()=>'2026-10-04');
  x.begin('幫我把早餐改成 80');
  await x.propose({operation:'amend',data:{filter:{description:['早餐']},transactions:[{kind:'expense',description:'早餐',amount:'80',debit:'expenses:food:dining',credit:'assets:cash'}]}});
@@ -193,7 +194,7 @@ test('amend previews removal and replacement under one token and validates the n
 });
 test('stats are summarised readably with exact figures',()=>{
  const t=formatStats(JSON.stringify({transaction_count:3,currencies:{TWD:{income:'0',expense:'-1495',net:'-1495'}},income_categories:{},expense_categories:{'expenses:food:dining':{TWD:'-65'},'expenses:transport:driving':{TWD:'-1200'}},period:{begin:'2026-10-01',end_exclusive:'2026-11-01'}}))!;
- assert.match(t,/2026-10-01 ～ 2026-10-31，共 3 筆/);assert.match(t,/TWD：收入 0｜支出 1495｜淨額 -1495/);
+ assert.match(t,/2026-10-01 ～ 2026-10-31，共 3 筆/);assert.match(t,/\| TWD \| 0 \| 1495 \| -1495 \|/);assert.match(t,/\| 分類 \| 金額 \| 幣別 \|/);
  assert.ok(t.indexOf('driving')<t.indexOf('dining'));assert.equal(formatStats('not json'),undefined);
 });
 test('operation hints route spending totals to stats and balances to query',async()=>{
@@ -262,7 +263,8 @@ test('an unstated payment account is left to the ledger payment rules',async()=>
 });
 test('short confirmations and compact postings',()=>{
  for(const t of ['確認','好','ok','OK!','對','確定。'])assert.ok(isShortConfirm(t),t);
- for(const t of ['確認一下這筆是什麼','好像不對','ok google'])assert.equal(isShortConfirm(t),false,t);
+ for(const t of ['確認 剛剛那筆轉帳','確認這兩筆','好，確認吧'.slice(2),'確認剛剛那筆美金轉帳','確認這筆消費'])assert.ok(isShortConfirm(t),t);
+ for(const t of ['確認一下這筆是什麼','好像不對','ok google','確認一下','確認第一筆','只確認部分','確認 120 那筆'])assert.equal(isShortConfirm(t),false,t);
  assert.equal(postingLines('2026-10-04 洗車 [1/1]\n    ; kind:expense\n    expenses:transport:vehicle         300 TWD\n    assets:cash:wallet                -300 TWD\n'),'・2026-10-04 洗車 300 TWD｜expenses:transport:vehicle｜assets:cash:wallet');
 });
 test('typed requests that state no date are always recorded today',async()=>{
@@ -272,4 +274,34 @@ test('typed requests that state no date are always recorded today',async()=>{
  const x=W(async(r:any)=>{calls.push(structuredClone(r));return preview;},()=>'2026-10-05');x.begin('昨天高鐵 1015 元');
  await x.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'高鐵',amount:'1015',date:'2026-10-04',debit:'expenses:shopping'}]}});
  assert.equal(calls.at(-1).data.transactions[0].date,'2026-10-04');
+});
+test('real Qwen slips are repaired instead of failing the proposal',async()=>{
+ const calls:any[]=[];const bridge=async(r:any)=>{calls.push(structuredClone(r));return preview;};
+ // 高鐵 2026-10-07: sides swapped and the expense account on the (unstated) credit side.
+ const a=W(bridge,()=>'2026-10-07');a.begin('記帳 1015 高鐵');
+ await a.propose({operation:'ingest',data:{transactions:[{kind:'expense',description:'高鐵',amount:'1015',currency:'TWD',debit:'assets:cash:wallet',credit:'expenses:transport:transit'}]}});
+ let row=calls.at(-1).data.transactions[0];assert.equal(row.debit,'expenses:transport:transit');assert.equal(row.credit,undefined);
+ // 洗車 2026-10-04: defaults.account / payment and no kind.
+ const b=W(bridge,()=>'2026-10-04');b.begin('【記帳】300元洗車');
+ await b.propose({operation:'ingest',data:{defaults:{account:'expenses:transport:transit',payment:'cash',currency:'TWD'},transactions:[{description:'洗車',amount:'300'}]}});
+ const d=calls.at(-1).data;assert.equal(d.defaults.account,undefined);assert.equal(d.defaults.payment,undefined);assert.equal(d.defaults.debit,'expenses:transport:transit');assert.equal(d.transactions[0].kind,'expense');
+ // kind "posting" is read from the accounts.
+ const c=W(bridge,()=>'2026-10-04');c.begin('薪水 50000');
+ await c.propose({operation:'ingest',data:{transactions:[{kind:'posting',description:'薪水',amount:'50000',debit:'assets:cash',credit:'income:salary'}]}});
+ assert.equal(calls.at(-1).data.transactions[0].kind,'income');
+});
+test('nearest catalog category for invented accounts',async()=>{
+ const {nearestCategory}=await import('./workflows.ts');
+ const catalog=['expenses:food:dining','expenses:food','expenses:pets','expenses:shopping:pet-supplies','expenses:transport','expenses:transport:taxi','expenses:uncategorized'];
+ assert.equal(nearestCategory('expenses:food:pet',catalog,{account:'expenses:uncategorized',source:'fallback'}),'expenses:pets');
+ assert.equal(nearestCategory('expenses:transport:hsr',catalog),'expenses:transport');
+ assert.equal(nearestCategory('expenses:zzz:qqq',catalog,{account:'expenses:food:dining',source:'history'}),'expenses:food:dining');
+ assert.equal(nearestCategory('assets:cash',catalog),'expenses:uncategorized');
+});
+
+test('a transfer written 從 A 到 B is posted A→B even when the model swaps the sides',async()=>{
+ let sent:any;const w=W(async(r:any,o:any)=>{if(o.mode==='preview')sent=r;return {code:0,stdout:'2026-10-15 x\n    a  1 USD\n    b',stderr:'',snapshot:'a'};});
+ w.begin('轉帳 27 USD 從 assets:bank:usd-account 到 assets:investments:us-stocks');
+ await w.propose({operation:'ingest',data:{transactions:[{kind:'transfer',description:'轉帳',amount:'27',currency:'USD',debit:'assets:bank:usd-account',credit:'assets:investments:us-stocks'}]}});
+ assert.equal(sent.data.transactions[0].debit,'assets:investments:us-stocks');assert.equal(sent.data.transactions[0].credit,'assets:bank:usd-account');
 });

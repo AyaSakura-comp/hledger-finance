@@ -1,18 +1,26 @@
 import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { FinanceBatch, parseEntries, hledgerAccounts, localDate, pythonBackend, requireToolCall, userMessage, isRepeatRequest, type Backend } from './core.ts';
+import { FinanceBatch, parseEntries, hasExplicitFinanceTag, hledgerAccounts, localDate, pythonBackend, requireToolCall, userMessage, isRepeatRequest, type Backend } from './core.ts';
 import { registerManaged } from './managed.ts';
 import type { Bridge } from './workflows.ts';
+import { registerLaya } from './laya-extension.ts';
+import type { Judge } from './laya.ts';
 
-export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;journal?:string;today?:()=>string;stateDir?:string;accounts?:()=>Promise<string[]>}={}):ExtensionFactory {
+export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;journal?:string;today?:()=>string;stateDir?:string;accounts?:()=>Promise<string[]>;decisions?:'agent'|'laya';judge?:Judge}={}):ExtensionFactory {
  return (pi:ExtensionAPI)=>{
   let flow:FinanceBatch|undefined;let retries=0;
   let savedTools:string[]|undefined;
   const journal=options.journal??process.env.PI_FINANCE_JOURNAL??join(homedir(),'finance/main.journal');
+  if((options.decisions??process.env.PI_FINANCE_DECISIONS)==='laya'){
+   const canonical=(path:string)=>{try{return realpathSync(path);}catch{return resolve(path);}};
+   if(!(options.journal??process.env.PI_FINANCE_JOURNAL)||canonical(journal)===canonical(join(homedir(),'finance/main.journal')))throw new Error('Experimental Laya mode requires an explicitly isolated journal; production journal refused');
+   registerLaya(pi,{...options,journal});return;
+  }
   const backend=options.backend??pythonBackend({journal});
   const recent:{at:number;rows?:any[]}={at:0};
   const accounts=options.accounts??hledgerAccounts(journal);
@@ -39,7 +47,7 @@ export function createFinanceExtension(options:{backend?:Backend;bridge?:Bridge;
    }
    // An amount with unconverted Zhuyin would otherwise reach the general model.
    if(!event.images?.length&&/\d/.test(text)&&/[\u3100-\u312F\u31A0-\u31BFˊˇˋ˙]/.test(text)){report('看起來有注音沒有選字（例如「ㄒㄧ ㄔㄜˋ」），沒有記帳。請改成國字後重新輸入，例如「300 洗車」。');return {action:'handled'};}
-   if(event.images?.length||!parseEntries(text,today))return;
+   if(event.images?.length||!hasExplicitFinanceTag(text)||!parseEntries(text,today))return;
    restore();savedTools=pi.getActiveTools();
    flow=new FinanceBatch(backend,accounts,state=>pi.appendEntry('finance-state',{version:1,state}),paymentRules);retries=0;
    try{

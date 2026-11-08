@@ -75,7 +75,7 @@ export class FinanceFlow {
    const output=await this.backend(['ingest-json','-'],payload);
    if(!/Records ready: \d+; duplicates skipped: \d+/.test(output))throw new Error('Unrecognized write receipt; inspect journal before retrying');
    this.move('done');
-   return `${/Records ready: 0; duplicates skipped: 1/.test(output)?'重複請求，未再次寫入':'已記帳'}：${e.date} ${e.description} ${e.amount} ${e.currency}｜${category}。${e.inferredDate?'日期預設本地今天；':''}${e.inferredCurrency?'幣別預設台幣；':''}付款來源依帳本設定。\n${output.trim()}`;
+   return `${/Records ready: 0; duplicates skipped: 1/.test(output)?'重複請求，未再次寫入':'已記帳'}：${e.date} ${e.description} ${e.amount} ${e.currency}｜${category}。${e.inferredDate?'日期預設本地今天；':''}${e.inferredCurrency?'幣別預設台幣；':''}付款來源依帳本設定。`;
   }catch(error){this.move('failed');throw error;}
  }
 }
@@ -111,7 +111,14 @@ export function userMessage(text:string):string{
  const lines=text.split('\n');
  let start=-1;for(let i=0;i<lines.length;i++)if(/^\[(?:Web|Discord) user: [^\]\n]*\]$/.test(lines[i].trim()))start=i;
  const body=(start>=0?lines.slice(start+1):lines).filter(l=>!/^\[(?:Voice message transcription: [^\]]*|Attachment-only message: \d+ files? attached\.)\]$/.test(l.trim()));
- return spokenAmounts(body.join('\n').trim());
+ return spokenAmounts(quotedReply(body.join('\n').trim()));
+}
+// piweb sends a quote-reply with no typed text as just "<quoted_selection>…
+// </quoted_selection>". Quoting 「確認」/「取消」 from a preview means saying it.
+function quotedReply(text:string):string{
+ const m=/^<quoted_selection>\s*([\s\S]*?)\s*<\/quoted_selection>$/.exec(text);
+ const quoted=m?.[1].replace(/^[「『"“]|[」』"”]$/g,'').trim();
+ return quoted!==undefined&&/^(?:確認|確定|好|好的|ok|okay|yes|對|是|沒問題|執行|confirm|取消(?:記帳)?)[!！。.]?$/i.test(quoted)?quoted:text;
 }
 const digit:Record<string,number>={零:0,〇:0,一:1,二:2,兩:2,两:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};
 const unit:Record<string,number>={十:10,拾:10,百:100,佰:100,千:1000,仟:1000};
@@ -142,18 +149,23 @@ const UNIT='元|塊錢?|TWD|NT\\$|台幣|新台幣|JPY|日圓|日幣|円|日元|
 const NUM='(?:[1-9]\\d{0,2}(?:,\\d{3})+|[1-9]\\d*|0)(?:\\.\\d{1,2})?';
 const INCOME=/收到|薪水|薪資|獎金|入帳|中獎|還我|收入|賺了?|利息|股利|退稅|紅利|撿到/;
 const PAYMENT=/^(?:用|以)?(信用卡|刷卡|LINE ?Pay|街口(?:支付)?|全支付|Apple ?Pay|悠遊付|現金)\s*(?:付款?|支付|刷|繳)?\s*/i;
+export function hasExplicitFinanceTag(raw:string):boolean{
+ const text=raw.replace(/<quoted_selection>[\s\S]*?<\/quoted_selection>/g,'').trim();
+ return /^(?:【(?:記帳|財務|finance)】|\[(?:記帳|財務|finance)\]|#(?:記帳|財務|finance)|\/(?:記帳|finance)(?:$|[\s:])|(?:記帳|財務)\s*[:：]|(?:記帳|財務)\s+|幫我記|記一筆|記一下|記個帳)/i.test(text);
+}
+
 export function parseEntries(raw:string,today:string):Entry[]|null{
  if(!validDate(today))throw new Error('Invalid host date');
  let text=raw.normalize('NFKC').trim();
- const prefixed=/^(?:【記帳】|\[記帳\]|記帳)/.test(text);
- text=text.replace(/^(?:【記帳】|\[記帳\]|記帳[:：]?|\/finance\s+)\s*/,'').replace(/^(?:請)?(?:幫我)?(?:記帳|記一下|記一筆|記個帳)[，,、:：\s]*/,'').trim();
+ const prefixed=hasExplicitFinanceTag(text);
+ text=text.replace(/^(?:【(?:記帳|財務|finance)】|\[(?:記帳|財務|finance)\]|#(?:記帳|財務|finance)|\/(?:記帳|finance)(?:$|[\s:])|(?:記帳|財務)\s*[:：]|(?:記帳|財務)\s+)\s*/i,'').replace(/^(?:請)?(?:幫我)?(?:記帳|記一下|記一筆|記個帳)[，,、:：\s]*/,'').trim();
  // Anything that needs judgement or confirmation stays on the guarded workflow.
  if(/\b(?:example|sample|budget|hypothetical|estimated?|approximately|if|refund|transfer|tomorrow)\b/i.test(text))return null;
  if(/如果|假設|範例|例如|預算|多少|是否|可以|嗎|如何|約|大概|估計|預計|打算|想買|價格|價錢|售價|定價|每人|每份|各自|昨天以前|明天|後天|下週|下星期|下個月|退款|退費|轉帳|提款|還款|借|貸|分期|執行|忽略|不要|取消|刪除|刪掉|改成|改為|更正|收據|發票(?!中獎)|(?:assets|liabilities|expenses|income|equity):|[?？"'`<>\\]/i.test(text))return null;
  let date=today,inferredDate=true;
  const iso=text.match(/^(\d{4}-\d{2}-\d{2})\s*/);
  if(iso){if(!validDate(iso[1]))return null;date=iso[1];inferredDate=false;text=text.slice(iso[0].length);}
- else{const rel=text.match(/^(今天|昨天|前天)\s*/);if(rel){const d=new Date(today+'T12:00:00Z');d.setUTCDate(d.getUTCDate()-(rel[1]==='昨天'?1:rel[1]==='前天'?2:0));date=d.toISOString().slice(0,10);inferredDate=false;text=text.slice(rel[0].length);}}
+ else{const rel=text.match(/^(今天|昨天|前天)\s*[:：]?\s*/);if(rel){const d=new Date(today+'T12:00:00Z');d.setUTCDate(d.getUTCDate()-(rel[1]==='昨天'?1:rel[1]==='前天'?2:0));date=d.toISOString().slice(0,10);inferredDate=false;text=text.slice(rel[0].length);}}
  if(/今天|昨天|前天|上週|上星期|上個月|去年/.test(text))return null;
  const segments=text.split(/[、，,；;\n]+/).map(s=>s.trim()).filter(Boolean);
  if(!segments.length||segments.length>10)return null;
@@ -206,7 +218,10 @@ export class FinanceBatch{
  context(){
   const cats=(ev?:Evidence)=>ev?{binding:ev.binding,suggestion:ev.suggestion.account,choices:ev.categories.map(c=>c.account)}:undefined;
   const shared=this.evidence.find(Boolean);
-  return {entries:this.entries.map((e,i)=>({i,kind:e.kind,description:e.description,amount:e.amount,currency:e.currency,date:e.date,payment_hint:e.payment,suggestion:this.evidence[i]?.suggestion.account,binding:this.evidence[i]?.binding||undefined})),expense_categories:shared?shared.categories.map(c=>c.description?`${c.account} — ${c.description}`:c.account):undefined,income_categories:this.entries.some(e=>e.kind==='income')?this.incomeAccounts:undefined,payment_accounts:this.entries.some(e=>e.payment)?this.paymentAccounts:undefined};
+  // A fallback guess ("uncategorized", no evidence) is not a suggestion:
+  // models defer to it over an obvious catalog category (滷肉飯 -> uncategorized).
+  const suggested=(ev?:Evidence)=>ev&&(ev.binding||ev.suggestion.source!=='fallback')?ev.suggestion.account:undefined;
+  return {entries:this.entries.map((e,i)=>({i,kind:e.kind,description:e.description,amount:e.amount,currency:e.currency,date:e.date,payment_hint:e.payment,suggestion:suggested(this.evidence[i]),binding:this.evidence[i]?.binding||undefined})),expense_categories:shared?shared.categories.map(c=>c.description?`${c.account} — ${c.description}`:c.account):undefined,income_categories:this.entries.some(e=>e.kind==='income')?this.incomeAccounts:undefined,payment_accounts:this.entries.some(e=>e.payment)?this.paymentAccounts:undefined};
  }
  clarify(question:string){if(this.state!=='ready')throw new Error(`Invalid state ${this.state}`);if(!question.trim()||question.length>240)throw new Error('Invalid clarification');this.move('clarifying');return question;}
  async commit(choices:{category:string;payment?:string}[]){
@@ -235,7 +250,7 @@ export class FinanceBatch{
    const lines=rows.map(r=>`・${r.date} ${r.description} ${r.amount} ${r.currency}｜${r.kind==='expense'?r.debit:r.credit}${(r as any).credit&&r.kind==='expense'?'｜'+(r as any).credit:''}${(r as any).debit&&r.kind==='income'?'｜'+(r as any).debit:''}`);
    const dup=/Records ready: 0;/.test(output);
    const unmapped=this.entries.filter((e,i)=>e.payment&&!(choices[i].payment&&this.paymentAccounts.includes(choices[i].payment!))).map(e=>e.payment);
-   return `${dup?'重複請求，未再次寫入':`已記帳 ${rows.length} 筆`}：\n${lines.join('\n')}${unmapped.length?`\n「${[...new Set(unmapped)].join('、')}」沒有對應帳戶，付款帳戶依帳本規則。`:''}\n要撤銷請說「撤銷」。\n${output.trim()}`;
+   return `${dup?'重複請求，未再次寫入':`已記帳 ${rows.length} 筆`}：\n${lines.join('\n')}${unmapped.length?`\n「${[...new Set(unmapped)].join('、')}」沒有對應帳戶，付款帳戶依帳本規則。`:''}\n要撤銷請說「撤銷」。`;
   }catch(error){this.move('failed');throw error;}
  }
 }

@@ -1,8 +1,8 @@
 # Pi finance extension — guarded state machines
 
-**Installed globally on this machine (2026-10-04)** via `~/.pi/agent/settings.json` → `packages`; it acts on `~/finance/main.journal` unless `PI_FINANCE_JOURNAL` overrides it. Two layers:
+**Root package entrypoint: `channel.ts` (installed here 2026-10-09).** Both gateways load identical tools/system interfaces; only trusted `PI_FINANCE_HOST=piweb` enables the wallet (`~/finance/main.journal`, unless `PI_FINANCE_JOURNAL` overrides it). Piscord/unknown hosts deny finance, not a fake empty ledger. See [channel configuration and limits](CHANNEL-WALLET.md). The legacy direct `index.ts` installation examples below do not provide this channel wrapper; install the repository root for the guarded channel policy. Two internal layers:
 
-1. **Fast path (`index.ts` + `core.ts`)** — short single expenses such as `【記帳】1500 午餐`, `午餐 150 元`, `YouBike 15 元`. Host parses amount/date/currency; Qwen only picks a category through `finance_finish`.
+1. **Fast path (`agent.ts` + `core.ts`; legacy direct factory in `index.ts`)** — short single expenses such as `【記帳】1500 午餐`, `午餐 150 元`, `YouBike 15 元`. Host parses amount/date/currency; Qwen only picks a category through `finance_finish`.
 2. **Guarded workflows (`managed.ts` + `workflows.ts` + `../scripts/finance_bridge.py`)** — every other finance request. Qwen proposes one structured operation; the host validates it, previews it, and only a **new user message with the exact token** (`確認 <uuid>`) executes a mutation.
 
 | Area | Operations |

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { localDate } from './core.ts';
 import type { PendingStore } from './pending-store.ts';
+import { renderQuery, cell } from './render.ts';
 export const readonlyOperations=['query','stats','visualize','check','audit','classify','native','settings'] as const;
 export const mutationOperations=['ingest','amend','historical','installment','loan','delete','undo','rules','backup'] as const;
 export type Request={operation:string;data:Record<string,any>};
@@ -18,7 +19,10 @@ export class Workflow {
  constructor(private bridge:Bridge,private today:()=>string=localDate,private clock:()=>number=Date.now,private store?:PendingStore,private journal=''){}
  get confirmation(){return this.pending?.token;}
  begin(input:string,source:'text'|'image'|'file'|'pdf'='text',stableSourceDigest?:string){
-  if(['preparing','executing','awaiting_confirmation'].includes(this.state))throw new Error('Existing pending workflow');
+  if(['preparing','executing'].includes(this.state))throw new Error('Existing pending workflow');
+  // A preview awaiting confirmation stays in the persisted store while the
+  // user asks something else; 確認 later claims it from there. Only a new
+  // preview, 取消 or expiry retires it.
   this.input=input;this.id=stableSourceDigest?`src-${stableSourceDigest}`:`flow-${randomUUID()}`;this.source=source;this.pending=undefined;this.repairable=false;this.state='collecting';
  }
  resumeDraft(){if(this.state!=='failed'||!this.repairable)return false;this.repairable=false;this.state='collecting';return true;}
@@ -55,9 +59,33 @@ export class Workflow {
    // spellings the user did not type verbatim (Assets:Cash, Expense:Food, NTD).
    const account=(a:any)=>{if(typeof a!=='string'||this.input.includes(a))return a;const l=a.toLowerCase().replace(/^expense:/,'expenses:').replace(/^asset:/,'assets:').replace(/^liability:/,'liabilities:');return l;};
    const currency=(c:any)=>typeof c==='string'&&/^(ntd|nt\$?|twd)$/i.test(c.trim())?'TWD':c;
+   const family=(a:any)=>String(a??'').split(':')[0],side=(a:any)=>['assets','liabilities'].includes(family(a));
    for(const target of [request.data.defaults??{},...request.data.transactions]){
+    // Common field-name slips map to the real fields instead of a rejected
+    // proposal: account/category name the expense side, payment names the
+    // paying side (still dropped below unless the user said it).
+    for(const k of ['account','category','expense_account','debit_account'])if(k in target){if(!target.debit)target.debit=target[k];delete target[k];}
+    for(const k of ['payment','payment_account','paid_with','credit_account','from_account'])if(k in target){if(!target.credit&&/^(?:assets|liabilities):/i.test(String(target[k])))target.credit=target[k];delete target[k];}
     for(const k of ['debit','credit','fee_account'])if(k in target)target[k]=account(target[k]);
     for(const k of ['currency','debit_currency'])if(k in target)target[k]=currency(target[k]);
+   }
+   // A missing or invented kind ("posting") on a plain row is read from its
+   // accounts; transfers and other kinds are never guessed.
+   const kinds=['expense','income','transfer','refund','opening-balance','adjustment'];
+   if(request.data.defaults&&'kind' in request.data.defaults&&!kinds.includes(request.data.defaults.kind))delete request.data.defaults.kind;
+   for(const r of request.data.transactions){
+    if(kinds.includes(r.kind??request.data.defaults?.kind))continue;
+    const debit=r.debit??request.data.defaults?.debit,credit=r.credit??request.data.defaults?.credit;
+    if([debit,credit].some(a=>family(a)==='income'))r.kind='income';
+    else if(!debit||[debit,credit].some(a=>family(a)==='expenses'))r.kind='expense';
+   }
+   // An exactly reversed pair is the same fact written backwards. Canonicalize
+   // before unstated payment sides are dropped below, or the expense account
+   // would be the side that gets dropped.
+   for(const r of request.data.transactions){
+    const kind=r.kind??request.data.defaults?.kind,debit=r.debit??request.data.defaults?.debit,credit=r.credit??request.data.defaults?.credit;
+    const stated=[debit,credit].every(a=>typeof a==='string'&&this.input.toLowerCase().includes(a.toLowerCase()));
+    if(!stated&&kind==='expense'&&family(credit)==='expenses'&&side(debit)){r.debit=credit;r.credit=debit;}
    }
    const explicit=this.input.normalize('NFKC').match(/從\s*((?:assets|liabilities):[A-Za-z0-9_:.-]+)\s*轉出\s*([0-9,.]+)\s*([A-Z]{3})[\s\S]*?收到\s*([0-9,.]+)\s*([A-Z]{3})\s*到\s*((?:assets|liabilities):[A-Za-z0-9_:.-]+)/i);
    if(explicit){
@@ -121,13 +149,18 @@ export class Workflow {
     if(this.source!=='file')r.import_id=`${this.id}-${index}`;
     // kind fixes posting direction; an exactly reversed pair is the same
     // fact written backwards, so canonicalize instead of failing.
-    const family=(a:any)=>String(a??'').split(':')[0],side=(a:any)=>['assets','liabilities'].includes(family(a));
     const kind=r.kind??defaults.kind,debit=r.debit??defaults.debit,credit=r.credit??defaults.credit;
     const reversed=kind==='expense'?family(credit)==='expenses'&&side(debit):kind==='income'?family(debit)==='income'&&side(credit):kind==='refund'?family(debit)==='expenses'&&side(credit):false;
     // Never flip sides the user stated explicitly; a wrong kind must then be
     // fixed by the model (the backend rejects kind/side mismatches).
     const stated=pairs.some(([,d,c])=>String(debit).toLowerCase()===d.toLowerCase()&&String(credit).toLowerCase()===c.toLowerCase());
     if(reversed&&!stated){r.debit=credit;r.credit=debit;}
+    // "從 A 轉到 B" / "from A to B": money leaves A (credit) and lands in B
+    // (debit). Models swap these often; the user's words decide.
+    if(kind==='transfer'){
+     const m=this.input.match(/(?:從|由|from)\s*([a-z][\w:-]*)[\s\S]{0,30}?(?:轉到|轉入|轉至|到|至|to)\s*([a-z][\w:-]*)/i);
+     if(m&&String(debit).toLowerCase()===m[1].toLowerCase()&&String(credit).toLowerCase()===m[2].toLowerCase()){r.debit=credit;r.credit=debit;}
+    }
     if(!r.import_id)r.import_id=`${this.id}-${index}`;
     // Provenance is host-known: replace any model source tag and drop
     // non-canonical labels (they are metadata, never material facts).
@@ -146,7 +179,7 @@ export class Workflow {
    const valid=reply.code===0||(request.operation==='delete'&&reply.code===3);
    if(!valid)throw new Error(reply.stderr||reply.stdout||'Backend preview failed');
    if(readonlyOperations.includes(request.operation as any)){
-    this.state='done';return {text:(request.operation==='stats'?formatStats(reply.stdout):undefined)??(this.boundOutput(reply)||'沒有符合條件的紀錄。'),state:this.state};
+    this.state='done';return {text:(request.operation==='query'?renderQuery(request.data,this.boundOutput(reply)):request.operation==='stats'?formatStats(reply.stdout):undefined)??(this.boundOutput(reply)||'沒有符合條件的紀錄。'),state:this.state};
    }
    // Never hand out a token for a change that writes nothing.
    if(['ingest','amend'].includes(request.operation)&&/Records ready: 0\b/.test(reply.stdout+'\n'+reply.stderr)){
@@ -164,10 +197,11 @@ export class Workflow {
     catch(error){this.state='failed';return {text:`結果不確定，已停止且不自動重試：${String(error)}`,state:this.state};}
    }
    if(['delete','amend'].includes(request.operation)&&!reply.delete_token)throw new Error('No backend deletion token');
+   if(this.session)this.store?.dropSession(this.session); // a new preview replaces older ones
    const token=randomUUID();this.pending={request,reply:structuredClone(reply),token,expires:this.clock()+600000};this.state='awaiting_confirmation';
    // Full candidate preview is mandatory. Do not offer confirmation for a
    // truncated preview: narrow the batch/filter instead.
-   const preview=['ingest','amend'].includes(request.operation)?(request.operation==='amend'?amendHeader(reply.stdout)+'\n':'')+postingLines(reply.stdout.split(/\nADD:\n/).pop()??'',request):request.operation==='delete'?reply.stdout.replace(/^Confirmation token:.*$/gm,'').trim():JSON.stringify(request,null,2)+'\n'+reply.stdout+'\n'+reply.stderr;
+   const preview=['ingest','amend'].includes(request.operation)?(request.operation==='amend'?amendHeader(reply.stdout)+'\n':'')+postingLines(reply.stdout.split(/\nADD:\n/).pop()??'',request):request.operation==='delete'?formatDeleteCandidates(reply.stdout):request.operation==='undo'?formatUndoPreview(reply.stdout):reply.stdout.replace(/^[0-9a-f-]{36}\n?/gm,'').trim();
    if(Buffer.byteLength(preview)>45000||preview.split('\n').length>1800)throw new Error('Preview too large to show completely; narrow scope');
    this.store?.save({token,request,reply:structuredClone(reply),expires:this.pending.expires,journal:this.journal,session:this.session||undefined});
    return {text:`請確認以下${({ingest:'記帳',amend:'修改',delete:'刪除',undo:'復原',rules:'規則變更',backup:'備份',installment:'分期',loan:'貸款排程',historical:'歷史匯入'} as Record<string,string>)[request.operation]??request.operation}（尚未寫入）：\n${preview}\n\n回覆「確認」執行；回覆「取消」放棄。10 分鐘內有效。`,state:this.state};
@@ -185,11 +219,11 @@ export class Workflow {
    if(token!==this.pending.token)return null;
    // The persisted copy is the single authority: if another process already
    // consumed it, this in-memory preview must not execute again.
-   if(this.store&&!this.store.claim(token)){this.pending=undefined;this.state='cancelled';return null;}
+   if(this.store&&!this.store.claim(token,this.session||undefined)){this.pending=undefined;this.state='cancelled';return null;}
    authorized=this.pending;
   }else if(token&&this.store){
    // Preview issued by another pi process (print mode, recycled RPC worker).
-   const p=this.store.claim(token);if(!p)return null;
+   const p=this.store.claim(token,this.session||undefined);if(!p)return null;
    if(this.clock()>p.expires){this.state='cancelled';return {text:'授權已過期，未執行；請重新提出。',state:this.state};}
    authorized=p;
   }else return null;
@@ -204,21 +238,41 @@ export class Workflow {
  // Expense categories come from the user's catalog (standard, custom rules,
  // journal history) or the user's own words; the model must not invent
  // accounts such as "expenses:Groceries".
+ // An invented category is replaced with the closest catalog one instead of
+ // failing the proposal: the receipt shows it and amend/undo can fix it.
  private async checkExpenseAccounts(request:Request,signal?:AbortSignal){
-  const debits=[...new Set<string>(request.data.transactions.filter((r:any)=>(r.kind??request.data.defaults?.kind)==='expense').map((r:any)=>String(r.debit??request.data.defaults?.debit??'')).filter(Boolean))];
-  const unstated=debits.filter(a=>!this.input.includes(a));
-  if(!unstated.length)return;
-  const reply=await this.bridge({operation:'classify',data:{description:String(request.data.transactions[0]?.description??'expense')}},{mode:'preview',signal});
-  let catalog:string[];
-  try{catalog=(JSON.parse(reply.stdout).categories as {account:string}[]).map(c=>c.account);}catch{throw new Error('Cannot verify expense categories; nothing written');}
-  const unknown=unstated.filter(a=>!catalog.includes(a));
-  if(unknown.length)throw new Error(`Unknown expense account ${unknown.join(', ')}; choose exactly one of: ${catalog.join(', ')}`);
+  const rows=request.data.transactions.filter((r:any)=>(r.kind??request.data.defaults?.kind)==='expense');
+  const unstated=rows.filter((r:any)=>{const a=String(r.debit??request.data.defaults?.debit??'');return a&&!this.input.includes(a);});
+  for(const r of unstated){
+   const reply=await this.bridge({operation:'classify',data:{description:String(r.description??request.data.defaults?.description??'expense')}},{mode:'preview',signal});
+   let catalog:string[],suggestion:{account?:string;source?:string}|undefined;
+   try{const d=JSON.parse(reply.stdout);catalog=(d.categories as {account:string}[]).map(c=>c.account);suggestion=d.suggestion;}catch{throw new Error('Cannot verify expense categories; nothing written');}
+   const account=String(r.debit??request.data.defaults?.debit);
+   if(!catalog.includes(account))r.debit=nearestCategory(account,catalog,suggestion);
+  }
  }
  private boundOutput(reply:Reply):string{
   const text=reply.stdout+'\n'+reply.stderr;
   if(Buffer.byteLength(text)>45000||text.split('\n').length>1800) return text.slice(0,12000)+'\n[結果過長，已截斷；請縮小查詢範圍。]';
   return text.trim();
  }
+}
+
+// Closest catalog category for an invented one: an evidence-based suggestion,
+// then a catalog account sharing the most specific word (expenses:food:pet ->
+// expenses:pets), then the nearest catalog parent, then uncategorized.
+export function nearestCategory(account:string,catalog:string[],suggestion?:{account?:string;source?:string}):string{
+ if(suggestion?.account&&suggestion.source!=='fallback'&&catalog.includes(suggestion.account))return suggestion.account;
+ const parts=account.toLowerCase().split(':');
+ if(parts[0]==='expenses'){
+  for(const word of parts.slice(1).reverse()){
+   if(word.length<3)continue;
+   const hits=catalog.filter(c=>c.split(':').slice(1).some(s=>s.length>=3&&(s.startsWith(word)||word.startsWith(s))));
+   if(hits.length)return hits.sort((a,b)=>a.split(':').length-b.split(':').length||a.length-b.length)[0];
+  }
+  for(let n=parts.length-1;n>1;n--){const parent=parts.slice(0,n).join(':');if(catalog.includes(parent))return parent;}
+ }
+ return suggestion?.account&&catalog.includes(suggestion.account)?suggestion.account:'expenses:uncategorized';
 }
 
 export function pythonBridge(journal:string,env?:NodeJS.ProcessEnv):Bridge{
@@ -295,11 +349,11 @@ export function formatStats(stdout:string):string|undefined{
  let d:any;try{d=JSON.parse(stdout);}catch{return undefined;}
  if(!d||typeof d!=='object'||!d.currencies)return undefined;
  const period=d.period?.begin?`${d.period.begin} ～ ${d.period.end_exclusive?new Date(Date.parse(d.period.end_exclusive)-86400000).toISOString().slice(0,10):''}`:'全部期間';
- const lines=[`收支統計（${period}，共 ${d.transaction_count} 筆）`];
+ const lines=[`### 收支統計（${period}，共 ${d.transaction_count} 筆）`,'','| 幣別 | 收入 | 支出 | 淨額 |','| --- | ---: | ---: | ---: |'];
  const cur=Object.entries(d.currencies as Record<string,any>);
  if(!cur.length)lines.push('沒有符合條件的收支紀錄。');
- for(const [c,v] of cur)lines.push(`${c}：收入 ${v.income}｜支出 ${String(v.expense).replace(/^-/,'')}｜淨額 ${v.net}`);
- const cats=(o:any,label:string)=>{const rows=Object.entries(o??{}).flatMap(([acct,m]:any)=>Object.entries(m).map(([c,a]:any)=>({acct,c,a:Number(String(a).replace(/^-/,'')),raw:String(a).replace(/^-/,'')}))).sort((x,y)=>y.a-x.a);if(rows.length){lines.push(label);for(const r of rows)lines.push(`  ${r.acct}  ${r.raw} ${r.c}`);}};
+ for(const [c,v] of cur)lines.push(`| ${cell(c)} | ${cell(String(v.income))} | ${cell(String(v.expense).replace(/^-/,''))} | ${cell(String(v.net))} |`);
+ const cats=(o:any,label:string)=>{const rows=Object.entries(o??{}).flatMap(([acct,m]:any)=>Object.entries(m).map(([c,a]:any)=>({acct,c,a:Number(String(a).replace(/^-/,'')),raw:String(a).replace(/^-/,'')}))).sort((x,y)=>y.a-x.a);if(rows.length){lines.push('',`#### ${label}`,'','| 分類 | 金額 | 幣別 |','| --- | ---: | --- |');for(const r of rows)lines.push(`| ${cell(r.acct)} | ${cell(r.raw)} | ${cell(r.c)} |`);}};
  cats(d.expense_categories,'支出分類：');cats(d.income_categories,'收入分類：');
  return lines.join('\n');
 }
@@ -313,7 +367,7 @@ export function summarizeRows(request:Request):string{
  return filter+rows.join('\n');
 }
 
-export function isShortConfirm(t:string):boolean{return /^(?:確認|確定|好|好的|ok|okay|yes|y|對|是|沒問題|執行|confirm)[!！。.\s]*$/i.test(t.trim());}
+export function isShortConfirm(t:string):boolean{return /^(?:確認|確定|好|好的|ok|okay|yes|y|對|是|沒問題|執行|confirm)(?:[\s，,]*(?:吧|啦|喔|囉|了)?[\s，,]*(?:剛剛|剛才|上面|前面)?(?:的)?(?:那|這)?(?:幾|兩|一)?(?:筆|個)?(?:台幣|美金|美元|日圓|日幣|外幣)?(?:轉帳|記帳|交易|紀錄|記錄|預覽|資料|消費|支出|收入)?(?:吧|啦|喔)?)?[!！。.\s]*$/i.test(t.trim());}
 // Compact postings from backend journal text: "日期 描述 金額｜借方｜貸方".
 export function postingLines(stdout:string,request?:Request):string{
  const out:string[]=[];let head='';let posts:string[]=[];
@@ -323,8 +377,27 @@ export function postingLines(stdout:string,request?:Request):string{
  return out.length?out.join('\n'):(request?summarizeRows(request):stdout.trim());
 }
 function amendHeader(stdout:string):string{const m=/REMOVE:\n[\s\S]*?\[1\] ([^\n]+)\n\s+([^\n]+)/.exec(stdout);return m?`移除：${m[1].replace(/ \[\d+\/\d+\].*$/,'')}（${m[2].trim()}）\n改為：`:'';}
+export const ADOPTED='（帳本裡有在記帳工具外手動修改的內容，已先單獨存成一個版本，沒有被丟掉。）';
+const adopted=(output:Reply)=>/Adopted external journal edits/.test(output.stdout+output.stderr)?'\n'+ADOPTED:'';
+export function formatUndoPreview(stdout:string):string{
+ const m=/^[0-9a-f]{7,40}\s+(.+)$/m.exec(stdout.trim());
+ const subject=m?m[1].trim():stdout.replace(/^[0-9a-f]{7,40}\s*/i,'').trim();
+ return `即將復原上一筆操作：\n・**${subject || '最近一次變更'}**`;
+}
+export function formatDeleteCandidates(stdout:string):string{
+ const cleaned=stdout.replace(/^Confirmation token:.*$/gm,'').trim();
+ const countMatch=/Delete candidates:\s*(\d+)/i.exec(cleaned);
+ const count=countMatch?countMatch[1]:'';
+ const items:string[]=[];
+ for(const m of cleaned.matchAll(/\[\d+\]\s*(\d{4}-\d{2}-\d{2})\s+([^\n]+?)(?:\s+\[\d+\/\d+\])?\n\s+([^\n]+)/g)){
+  items.push(`・${m[1]} **${m[2].trim()}** ｜ \`${m[3].trim()}\``);
+ }
+ if(items.length)return `${count?`找到待刪除項目（共 ${count} 筆）：\n`:''}${items.join('\n')}`;
+ return cleaned;
+}
 function doneText(request:Request,output:Reply,preview?:Reply):string{
- if(['ingest','amend'].includes(request.operation)){const n=request.data.transactions?.length??0;const lines=postingLines((preview?.stdout??'')+'\n'+output.stdout,request);return `${request.operation==='amend'?'已修改':'已記帳 '+n+' 筆'}：\n${lines}\n要撤銷請說「撤銷」。`;}
- if(request.operation==='delete')return '已刪除。要復原請說「撤銷」。';
+ if(['ingest','amend'].includes(request.operation)){const n=request.data.transactions?.length??0;const lines=postingLines((preview?.stdout??'')+'\n'+output.stdout,request);return `${request.operation==='amend'?'已修改':'已記帳 '+n+' 筆'}：\n${lines}${adopted(output)}\n要撤銷請說「撤銷」。`;}
+ if(request.operation==='delete')return `已刪除。${adopted(output)}要復原請說「撤銷」。`;
+ if(request.operation==='undo')return `已成功撤銷上一筆操作。${adopted(output)}`;
  return '操作完成。\n'+(output.stdout+'\n'+output.stderr).trim().slice(0,3000);
 }

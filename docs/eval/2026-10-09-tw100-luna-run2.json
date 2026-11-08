@@ -1,0 +1,1909 @@
+[
+ {
+  "i": 0,
+  "prompt": "早餐 65 元",
+  "s": 7.0,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": true,
+  "adopted": true,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 早餐 65 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  （帳本裡有在記帳工具外手動修改的內容，已先單獨存成一個版本，沒有被丟掉。） || 已記帳：2026-10-09 早餐 65 TWD，分類為 `expenses:food:dining`。"
+ },
+ {
+  "i": 1,
+  "prompt": "午餐 120",
+  "s": 10.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 午餐 120 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 午餐 120 TWD，分類為 `expenses:food:dining`。"
+ },
+ {
+  "i": 2,
+  "prompt": "晚餐 280 元",
+  "s": 6.9,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 晚餐 280 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 晚餐 280 TWD，分類為 `expenses:food:dining`。"
+ },
+ {
+  "i": 3,
+  "prompt": "便當 95",
+  "s": 6.4,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 便當 95 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 便當 95 TWD，分類為餐飲。"
+ },
+ {
+  "i": 4,
+  "prompt": "滷肉飯 50 元",
+  "s": 7.0,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 滷肉飯 50 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 滷肉飯 50 TWD，分類為餐飲。"
+ },
+ {
+  "i": 5,
+  "prompt": "珍奶 60",
+  "s": 7.8,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:drinks"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 珍奶 60 TWD｜expenses:food:drinks 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 珍奶 60 TWD，分類為飲料。需要撤銷時請說「撤銷」。"
+ },
+ {
+  "i": 6,
+  "prompt": "咖啡 85 元",
+  "s": 8.0,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:drinks"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 咖啡 85 TWD｜expenses:food:drinks 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 咖啡 85 TWD，分類為 `expenses:food:drinks`。"
+ },
+ {
+  "i": 7,
+  "prompt": "星巴克 155",
+  "s": 6.7,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:drinks"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 星巴克 155 TWD｜expenses:food:drinks 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 星巴克 155 TWD，分類為飲品。"
+ },
+ {
+  "i": 8,
+  "prompt": "全家 89 元",
+  "s": 6.9,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:convenience"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 全家 89 TWD｜expenses:food:convenience 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 全家 89 TWD，分類為便利商店。"
+ },
+ {
+  "i": 9,
+  "prompt": "7-11 買早餐 75",
+  "s": 7.6,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 7-11 買早餐 75 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 早餐 75 TWD，分類為餐飲。"
+ },
+ {
+  "i": 10,
+  "prompt": "全聯 680 元",
+  "s": 7.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": true,
+  "adopted": true,
+  "clean": true,
+  "accounts": [
+   "expenses:food:groceries"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 全聯 680 TWD｜expenses:food:groceries 要撤銷請說「撤銷」。  （帳本裡有在記帳工具外手動修改的內容，已先單獨存成一個版本，沒有被丟掉。） || 已記帳：2026-10-09 全聯 680 TWD，分類為食品／雜貨。"
+ },
+ {
+  "i": 11,
+  "prompt": "家樂福 1250",
+  "s": 8.0,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:groceries"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 家樂福 1250 TWD｜expenses:food:groceries 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 家樂福 1,250 TWD，分類為 groceries。"
+ },
+ {
+  "i": 12,
+  "prompt": "好市多 3420 元",
+  "s": 7.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:groceries"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 好市多 3420 TWD｜expenses:food:groceries 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 好市多 3420 TWD，分類為 groceries。"
+ },
+ {
+  "i": 13,
+  "prompt": "屈臣氏面膜 299 元",
+  "s": 9.3,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:personal-care"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 屈臣氏面膜 299 TWD｜expenses:personal-care 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 屈臣氏面膜 299 TWD，分類為個人護理。"
+ },
+ {
+  "i": 14,
+  "prompt": "康是美 188",
+  "s": 7.5,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:personal-care"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 康是美 188 TWD｜expenses:personal-care 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 康是美 188 TWD，分類為個人護理。"
+ },
+ {
+  "i": 15,
+  "prompt": "加油 1200 元",
+  "s": 7.4,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:driving"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 加油 1200 TWD｜expenses:transport:driving 要撤銷請說「撤銷」。  || 已記帳：加油 1,200 TWD，分類為交通／駕車。"
+ },
+ {
+  "i": 16,
+  "prompt": "停車費 60",
+  "s": 6.9,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:driving"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 停車費 60 TWD｜expenses:transport:driving 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 停車費 60 TWD，分類為交通－駕車。"
+ },
+ {
+  "i": 17,
+  "prompt": "ETC 扣款 45 元",
+  "s": 8.7,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:driving"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 ETC 扣款 45 TWD｜expenses:transport:driving 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 ETC 扣款 45 TWD，分類為交通駕駛。"
+ },
+ {
+  "i": 18,
+  "prompt": "悠遊卡加值 500",
+  "s": 10.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:transit"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 悠遊卡加值 500 TWD｜expenses:transport:transit 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 悠遊卡加值 500 TWD，分類為交通／大眾運輸。"
+ },
+ {
+  "i": 19,
+  "prompt": "捷運 35 元",
+  "s": 7.3,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:transit"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 捷運 35 TWD｜expenses:transport:transit 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 捷運 35 TWD，分類為交通／大眾運輸。"
+ },
+ {
+  "i": 20,
+  "prompt": "高鐵 1490 元",
+  "s": 8.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": true,
+  "adopted": true,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:transit"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 高鐵 1490 TWD｜expenses:transport:transit 要撤銷請說「撤銷」。  （帳本裡有在記帳工具外手動修改的內容，已先單獨存成一個版本，沒有被丟掉。） || 已記帳：2026-10-09 高鐵 1490 TWD，分類為交通運輸。"
+ },
+ {
+  "i": 21,
+  "prompt": "台鐵 375",
+  "s": 7.4,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:transit"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 台鐵 375 TWD｜expenses:transport:transit 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 台鐵 375 TWD，分類為交通／大眾運輸。"
+ },
+ {
+  "i": 22,
+  "prompt": "Uber 230 元",
+  "s": 7.0,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:taxi"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 Uber 230 TWD｜expenses:transport:taxi 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 Uber 230 TWD，分類為交通／計程車。"
+ },
+ {
+  "i": 23,
+  "prompt": "計程車 185",
+  "s": 9.6,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:taxi"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 計程車 185 TWD｜expenses:transport:taxi 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 計程車 185 TWD，分類為交通／計程車。"
+ },
+ {
+  "i": 24,
+  "prompt": "YouBike 10 元",
+  "s": 9.7,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:transit"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 YouBike 10 TWD｜expenses:transport:transit 要撤銷請說「撤銷」。  || 已記帳：YouBike 10 TWD，分類為交通／大眾運輸。"
+ },
+ {
+  "i": 25,
+  "prompt": "房租 15000 元",
+  "s": 7.9,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:housing"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 房租 15000 TWD｜expenses:housing 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 房租 15000 TWD，分類為 `expenses:housing`。"
+ },
+ {
+  "i": 26,
+  "prompt": "電費 1380",
+  "s": 6.6,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:utilities"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 電費 1380 TWD｜expenses:utilities 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 電費 1,380 TWD，分類為 `expenses:utilities`。"
+ },
+ {
+  "i": 27,
+  "prompt": "水費 420 元",
+  "s": 7.7,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:utilities"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 水費 420 TWD｜expenses:utilities 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 水費 420 TWD，分類為 `expenses:utilities`。"
+ },
+ {
+  "i": 28,
+  "prompt": "瓦斯費 650",
+  "s": 7.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:utilities"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 瓦斯費 650 TWD｜expenses:utilities 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 瓦斯費 650 TWD，分類為 `expenses:utilities`。"
+ },
+ {
+  "i": 29,
+  "prompt": "中華電信月租 599 元",
+  "s": 9.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:utilities"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 中華電信月租 599 TWD｜expenses:utilities 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 中華電信月租 599 TWD，分類為「水電瓦斯／電話／網路」。"
+ },
+ {
+  "i": 30,
+  "prompt": "Netflix 390",
+  "s": 8.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": true,
+  "adopted": true,
+  "clean": true,
+  "accounts": [
+   "expenses:subscriptions"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 Netflix 390 TWD｜expenses:subscriptions 要撤銷請說「撤銷」。  （帳本裡有在記帳工具外手動修改的內容，已先單獨存成一個版本，沒有被丟掉。） || 已記帳：Netflix 390 TWD，分類為「訂閱服務」。   日期：2026-10-09。"
+ },
+ {
+  "i": 31,
+  "prompt": "Spotify 149 元",
+  "s": 6.9,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:subscriptions"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 Spotify 149 TWD｜expenses:subscriptions 要撤銷請說「撤銷」。  || 已記帳：Spotify 149 TWD，分類為訂閱（2026-10-09）。"
+ },
+ {
+  "i": 32,
+  "prompt": "ChatGPT 650 元",
+  "s": 6.7,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:subscriptions"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 ChatGPT 650 TWD｜expenses:subscriptions 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 ChatGPT 650 TWD，分類為訂閱。"
+ },
+ {
+  "i": 33,
+  "prompt": "健身房月費 1299",
+  "s": 7.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:sports"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 健身房月費 1299 TWD｜expenses:sports 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 健身房月費 1299 TWD｜expenses:sports。"
+ },
+ {
+  "i": 34,
+  "prompt": "看牙醫 150 元",
+  "s": 7.5,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:health"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 看牙醫 150 TWD｜expenses:health 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 看牙醫 150 TWD，分類為 `expenses:health`。"
+ },
+ {
+  "i": 35,
+  "prompt": "掛號費 200",
+  "s": 7.0,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:health"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 掛號費 200 TWD｜expenses:health 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 掛號費 200 TWD，分類為 `expenses:health`。"
+ },
+ {
+  "i": 36,
+  "prompt": "藥局買感冒藥 320 元",
+  "s": 10.0,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:health:medicine"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 藥局買感冒藥 320 TWD｜expenses:health:medicine 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 藥局買感冒藥 320 TWD，分類為 `expenses:health:medicine`。"
+ },
+ {
+  "i": 37,
+  "prompt": "剪頭髮 500",
+  "s": 7.3,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:personal-care"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 剪頭髮 500 TWD｜expenses:personal-care 要撤銷請說「撤銷」。  || 已記帳：剪頭髮 500 TWD，分類為 `expenses:personal-care`。"
+ },
+ {
+  "i": 38,
+  "prompt": "洗衣店 180 元",
+  "s": 8.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:uncategorized"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 洗衣店 180 TWD｜expenses:uncategorized 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 洗衣店 180 TWD，分類為 `expenses:uncategorized`。"
+ },
+ {
+  "i": 39,
+  "prompt": "洗車 300 元",
+  "s": 12.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:driving"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 洗車 300 TWD｜expenses:transport:driving 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 洗車 300 TWD，分類為交通／駕車。"
+ },
+ {
+  "i": 40,
+  "prompt": "300元洗車",
+  "s": 13.7,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": true,
+  "adopted": true,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:driving"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 洗車 300 TWD｜expenses:transport:driving 要撤銷請說「撤銷」。  （帳本裡有在記帳工具外手動修改的內容，已先單獨存成一個版本，沒有被丟掉。） || 已記帳：2026-10-09 洗車 300 TWD，分類為 `expenses:transport:driving`。"
+ },
+ {
+  "i": 41,
+  "prompt": "1500 午餐",
+  "s": 8.6,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 午餐 1500 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 午餐 1500 TWD｜expenses:food:dining。"
+ },
+ {
+  "i": 42,
+  "prompt": "【記帳】60元貓罐頭",
+  "s": 8.9,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:pets"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 貓罐頭 60 TWD｜expenses:pets 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 貓罐頭 60 TWD，分類為 `expenses:pets`。"
+ },
+ {
+  "i": 43,
+  "prompt": "【記帳】4499元 衣服",
+  "s": 8.4,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:shopping:clothing"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 衣服 4499 TWD｜expenses:shopping:clothing 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 衣服 4,499 TWD，分類為購物／服飾。"
+ },
+ {
+  "i": 44,
+  "prompt": "【記帳】3000日圓 GPT",
+  "s": 10.4,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:subscriptions"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 GPT 3000 JPY｜expenses:subscriptions 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 GPT，3,000 JPY，分類為訂閱。"
+ },
+ {
+  "i": 45,
+  "prompt": "昨天晚餐 350 元",
+  "s": 8.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-08 晚餐 350 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳：2026-10-08 晚餐 350 TWD，分類為「餐飲」。"
+ },
+ {
+  "i": 46,
+  "prompt": "前天看電影 330",
+  "s": 7.5,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:entertainment"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-07 看電影 330 TWD｜expenses:entertainment 要撤銷請說「撤銷」。  || 已記帳：2026-10-07 看電影 330 TWD，分類為娛樂。"
+ },
+ {
+  "i": 47,
+  "prompt": "今天午餐 140 元",
+  "s": 7.3,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 午餐 140 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 午餐 140 TWD，分類為餐飲。"
+ },
+ {
+  "i": 48,
+  "prompt": "2026-10-01 書 420 元",
+  "s": 7.6,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:education:books"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-01 書 420 TWD｜expenses:education:books 要撤銷請說「撤銷」。  || 已記帳：2026-10-01 書 420 TWD，分類為 `expenses:education:books`。"
+ },
+ {
+  "i": 49,
+  "prompt": "威力彩 100 元",
+  "s": 7.7,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:entertainment:lottery"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 威力彩 100 TWD｜expenses:entertainment:lottery 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 威力彩 100 TWD，分類為彩券。"
+ },
+ {
+  "i": 50,
+  "prompt": "午餐 120、飲料 50",
+  "s": 8.5,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": true,
+  "adopted": true,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining",
+   "expenses:food:drinks"
+  ],
+  "reply": "已記帳 2 筆： ・2026-10-09 午餐 120 TWD｜expenses:food:dining ・2026-10-09 飲料 50 TWD｜expenses:food:drinks 要撤銷請說「撤銷」。  （帳本裡有在記帳工具外手動修改的內容，已先單獨存成一個版本，沒有被丟掉。） || 已記帳 2 筆（2026-10-09）： - 午餐：120 TWD - 飲料：50 TWD  合計 170 TWD。"
+ },
+ {
+  "i": 51,
+  "prompt": "早餐 60、午餐 110、晚餐 200",
+  "s": 9.8,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining",
+   "expenses:food:dining",
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 3 筆： ・2026-10-09 早餐 60 TWD｜expenses:food:dining ・2026-10-09 午餐 110 TWD｜expenses:food:dining ・2026-10-09 晚餐 200 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳 3 筆，共 **370 TWD**：早餐、午餐、晚餐皆歸入 `expenses:food:dining`。"
+ },
+ {
+  "i": 52,
+  "prompt": "咖啡95元、YouBike15元",
+  "s": 9.7,
+  "confirm": null,
+  "path": "general",
+  "tools": [
+   "finance_handoff",
+   "finance_inspect",
+   "finance_inspect",
+   "finance_finish"
+  ],
+  "ok": false,
+  "extra": -2,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [],
+  "reply": " || "
+ },
+ {
+  "i": 53,
+  "prompt": "便當 90，飲料 45",
+  "s": 8.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining",
+   "expenses:food:drinks"
+  ],
+  "reply": "已記帳 2 筆： ・2026-10-09 便當 90 TWD｜expenses:food:dining ・2026-10-09 飲料 45 TWD｜expenses:food:drinks 要撤銷請說「撤銷」。  || 已記帳 2 筆：便當 90 TWD、飲料 45 TWD。分類分別為餐飲與飲料。"
+ },
+ {
+  "i": 54,
+  "prompt": "記帳 168元 飲料\n75 停車費\n453 披薩",
+  "s": 9.3,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:drinks",
+   "expenses:transport:driving",
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 3 筆： ・2026-10-09 飲料 168 TWD｜expenses:food:drinks ・2026-10-09 停車費 75 TWD｜expenses:transport:driving ・2026-10-09 披薩 453 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳 3 筆，共 **696 TWD**（飲料、停車費、披薩），日期為 2026-10-09。"
+ },
+ {
+  "i": 55,
+  "prompt": "剛剛搭計程車花了 230",
+  "s": 7.5,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:taxi"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 搭計程車 230 TWD｜expenses:transport:taxi 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 搭計程車 230 TWD，分類為交通／計程車。"
+ },
+ {
+  "i": 56,
+  "prompt": "在全聯買東西花了 460",
+  "s": 9.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:groceries"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 在全聯買東西 460 TWD｜expenses:food:groceries 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 在全聯消費 460 TWD，分類為 groceries。"
+ },
+ {
+  "i": 57,
+  "prompt": "買衛生紙花了 299 元",
+  "s": 7.5,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:housing:supplies"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 買衛生紙 299 TWD｜expenses:housing:supplies 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 買衛生紙 299 TWD，分類為「expenses:housing:supplies」。"
+ },
+ {
+  "i": 58,
+  "prompt": "今天吃火鍋花了 860",
+  "s": 11.8,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 吃火鍋 860 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 吃火鍋 860 TWD，分類為餐飲。"
+ },
+ {
+  "i": 59,
+  "prompt": "繳了保險費 3600",
+  "s": 8.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:insurance"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 繳了保險費 3600 TWD｜expenses:insurance 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 保險費 3,600 TWD，分類為 `expenses:insurance`。"
+ },
+ {
+  "i": 60,
+  "prompt": "幫我記帳 午餐一百五十元",
+  "s": 9.3,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": true,
+  "adopted": true,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 午餐 150 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  （帳本裡有在記帳工具外手動修改的內容，已先單獨存成一個版本，沒有被丟掉。） || 已記帳：2026-10-09 午餐 **150 TWD**，分類為 `expenses:food:dining`。"
+ },
+ {
+  "i": 61,
+  "prompt": "剛剛在全聯買東西 花了四百六十塊",
+  "s": 9.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:groceries"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 在全聯買東西 460 TWD｜expenses:food:groceries 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 全聯購物 460 TWD，分類為 `expenses:food:groceries`。"
+ },
+ {
+  "i": 62,
+  "prompt": "記一下 咖啡八十五元",
+  "s": 7.8,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:drinks"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 咖啡 85 TWD｜expenses:food:drinks 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 咖啡 85 TWD，分類為 `expenses:food:drinks`。"
+ },
+ {
+  "i": 63,
+  "prompt": "早餐五十塊",
+  "s": 7.0,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 早餐 50 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 早餐 50 TWD，分類為餐飲。"
+ },
+ {
+  "i": 64,
+  "prompt": "加油一千二百元",
+  "s": 7.6,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:driving"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 加油 1200 TWD｜expenses:transport:driving 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 加油 1,200 TWD，分類為交通／駕駛。"
+ },
+ {
+  "i": 65,
+  "prompt": "今天收到薪水 50000 元",
+  "s": 10.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "income:salary"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 收到薪水 50000 TWD｜income:salary｜assets:cash:wallet 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 收到薪水 50,000 TWD，分類為薪資，入帳至現金錢包。"
+ },
+ {
+  "i": 66,
+  "prompt": "年終獎金 80000 元入帳",
+  "s": 12.4,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "income:bonus"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 年終獎金 80000 TWD｜income:bonus｜assets:cash:wallet 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 年終獎金 80,000 TWD，分類為 `income:bonus`，入帳至現金錢包。"
+ },
+ {
+  "i": 67,
+  "prompt": "發票中獎 200 元",
+  "s": 9.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "income:rebates"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 發票中獎 200 TWD｜income:rebates｜assets:cash:wallet 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 發票中獎 200 TWD，分類為 income:rebates，入帳至現金錢包。需要撤銷請說「撤銷」。"
+ },
+ {
+  "i": 68,
+  "prompt": "朋友還我 500 元",
+  "s": 12.9,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "income:other"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 朋友還我 500 TWD｜income:other｜assets:cash:wallet 要撤銷請說「撤銷」。  || 已記帳：朋友歸還 500 TWD，分類為其他收入，存入現金錢包。"
+ },
+ {
+  "i": 69,
+  "prompt": "賣二手書收入 350",
+  "s": 9.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "income:other"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 賣二手書 350 TWD｜income:other｜assets:cash:wallet 要撤銷請說「撤銷」。  || 已記帳：賣二手書收入 350 TWD，分類為其他收入，存入現金錢包。"
+ },
+ {
+  "i": 70,
+  "prompt": "午餐 1200 JPY",
+  "s": 7.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": true,
+  "adopted": true,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 午餐 1200 JPY｜expenses:food:dining 要撤銷請說「撤銷」。  （帳本裡有在記帳工具外手動修改的內容，已先單獨存成一個版本，沒有被丟掉。） || 已記帳：2026-10-09 午餐 1200 JPY，分類為 `expenses:food:dining`。"
+ },
+ {
+  "i": 71,
+  "prompt": "東京地鐵 210 日圓",
+  "s": 9.3,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:transport:transit"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 東京地鐵 210 JPY｜expenses:transport:transit 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 東京地鐵 210 JPY，分類為交通・大眾運輸。"
+ },
+ {
+  "i": 72,
+  "prompt": "美國 Amazon 買書 25 USD",
+  "s": 10.9,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:shopping"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 美國 Amazon 買書 25 USD｜expenses:shopping 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 美國 Amazon 買書 25 USD，分類為購物。"
+ },
+ {
+  "i": 73,
+  "prompt": "在日本買藥妝 3500 日幣",
+  "s": 6.4,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:personal-care"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 在日本買藥妝 3500 JPY｜expenses:personal-care 要撤銷請說「撤銷」。  || 已記帳：2026-10-09「在日本買藥妝」3500 JPY，分類為個人護理。"
+ },
+ {
+  "i": 74,
+  "prompt": "訂閱 iCloud 0.99 USD",
+  "s": 8.7,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:subscriptions"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 訂閱 iCloud 0.99 USD｜expenses:subscriptions 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 訂閱 iCloud 0.99 USD，分類為 `expenses:subscriptions`。"
+ },
+ {
+  "i": 75,
+  "prompt": "用信用卡買耳機 2990 元",
+  "s": 8.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:shopping:electronics"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 買耳機 2990 TWD｜expenses:shopping:electronics 「信用卡」沒有對應帳戶，付款帳戶依帳本規則。 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 購買耳機 2990 TWD，分類為 `expenses:shopping:electronics`。信用卡未對應到帳本帳戶，付款帳戶依帳本規則處理。"
+ },
+ {
+  "i": 76,
+  "prompt": "LINE Pay 付午餐 130",
+  "s": 7.0,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 午餐 130 TWD｜expenses:food:dining 「LINE Pay」沒有對應帳戶，付款帳戶依帳本規則。 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 午餐 130 TWD，分類為餐飲。LINE Pay 無對應帳戶，付款帳戶依帳本規則處理。"
+ },
+ {
+  "i": 77,
+  "prompt": "街口付飲料 55 元",
+  "s": 7.7,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:drinks"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 飲料 55 TWD｜expenses:food:drinks 「街口」沒有對應帳戶，付款帳戶依帳本規則。 要撤銷請說「撤銷」。  || 已記帳：飲料 55 TWD，分類為 `expenses:food:drinks`。   「街口」沒有對應付款帳戶，已依帳本規則處理。"
+ },
+ {
+  "i": 78,
+  "prompt": "現金付早餐 45",
+  "s": 7.0,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 早餐 45 TWD｜expenses:food:dining｜assets:cash 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 早餐 45 TWD，分類為餐飲，付款方式為現金。"
+ },
+ {
+  "i": 79,
+  "prompt": "刷卡繳電話費 799 元",
+  "s": 10.3,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:utilities"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 電話費 799 TWD｜expenses:utilities 「刷卡」沒有對應帳戶，付款帳戶依帳本規則。 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 電話費 799 TWD，分類為 `expenses:utilities`。   「刷卡」沒有對應帳戶，付款帳戶依帳本規則。"
+ },
+ {
+  "i": 80,
+  "prompt": "紅包 1200 元",
+  "s": 10.4,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": true,
+  "adopted": true,
+  "clean": true,
+  "accounts": [
+   "expenses:gifts"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 紅包 1200 TWD｜expenses:gifts 要撤銷請說「撤銷」。  （帳本裡有在記帳工具外手動修改的內容，已先單獨存成一個版本，沒有被丟掉。） || 已記帳：2026-10-09 紅包 1200 TWD，分類為 `expenses:gifts`。若要撤銷，請說「撤銷」。"
+ },
+ {
+  "i": 81,
+  "prompt": "拜拜金紙 300",
+  "s": 7.6,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:donations"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 拜拜金紙 300 TWD｜expenses:donations 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 拜拜金紙 300 TWD，分類為宗教奉獻。"
+ },
+ {
+  "i": 82,
+  "prompt": "捐款 1000 元",
+  "s": 7.9,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:donations"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 捐款 1000 TWD｜expenses:donations 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 捐款 1000 TWD，分類為 `expenses:donations`。"
+ },
+ {
+  "i": 83,
+  "prompt": "買禮物給媽媽 1680",
+  "s": 8.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:gifts"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 買禮物給媽媽 1680 TWD｜expenses:gifts 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 買禮物給媽媽 **1680 TWD**，分類為 `expenses:gifts`。"
+ },
+ {
+  "i": 84,
+  "prompt": "同事生日禮金 500 元",
+  "s": 8.1,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:gifts"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 同事生日禮金 500 TWD｜expenses:gifts 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 同事生日禮金 500 TWD，分類為 `expenses:gifts`。"
+ },
+ {
+  "i": 85,
+  "prompt": "貓砂 450 元",
+  "s": 6.9,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:pets"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 貓砂 450 TWD｜expenses:pets 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 貓砂 450 TWD，分類為 `expenses:pets`。"
+ },
+ {
+  "i": 86,
+  "prompt": "寵物美容 900",
+  "s": 11.5,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:pets"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 寵物美容 900 TWD｜expenses:pets 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 寵物美容 900 TWD，分類為 `expenses:pets`。"
+ },
+ {
+  "i": 87,
+  "prompt": "繳學費 25000 元",
+  "s": 8.8,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:education"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 繳學費 25000 TWD｜expenses:education 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 繳學費 25,000 TWD，分類為 `expenses:education`。"
+ },
+ {
+  "i": 88,
+  "prompt": "補習費 8000",
+  "s": 7.7,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:education"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 補習費 8000 TWD｜expenses:education 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 補習費 8000 TWD，分類為教育支出。"
+ },
+ {
+  "i": 89,
+  "prompt": "買教科書 650 元",
+  "s": 9.0,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:education:books"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 買教科書 650 TWD｜expenses:education:books 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 買教科書 650 TWD，分類為教育／書籍。"
+ },
+ {
+  "i": 90,
+  "prompt": "夜市雞排 85",
+  "s": 10.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": true,
+  "adopted": true,
+  "clean": true,
+  "accounts": [
+   "expenses:food:dining"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 夜市雞排 85 TWD｜expenses:food:dining 要撤銷請說「撤銷」。  （帳本裡有在記帳工具外手動修改的內容，已先單獨存成一個版本，沒有被丟掉。） || 已記帳：2026-10-09 夜市雞排 85 TWD，分類為「餐飲」。"
+ },
+ {
+  "i": 91,
+  "prompt": "鹹酥雞 150 元",
+  "s": 12.3,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:snacks"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 鹹酥雞 150 TWD｜expenses:food:snacks 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 鹹酥雞 150 TWD，分類為 `expenses:food:snacks`。"
+ },
+ {
+  "i": 92,
+  "prompt": "豆花 45",
+  "s": 9.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:snacks"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 豆花 45 TWD｜expenses:food:snacks 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 豆花 45 TWD，分類為 `expenses:food:snacks`。"
+ },
+ {
+  "i": 93,
+  "prompt": "滷味 120 元",
+  "s": 6.9,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 滷味 120 TWD｜expenses:food 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 滷味 120 TWD，分類為 `expenses:food`。"
+ },
+ {
+  "i": 94,
+  "prompt": "剉冰 70",
+  "s": 6.8,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:food:snacks"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 剉冰 70 TWD｜expenses:food:snacks 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 剉冰 70 TWD，分類為 `expenses:food:snacks`。"
+ },
+ {
+  "i": 95,
+  "prompt": "迪化街年貨 2300 元",
+  "s": 8.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:shopping"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 迪化街年貨 2300 TWD｜expenses:shopping 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 迪化街年貨 2300 TWD，分類為「expenses:shopping」。"
+ },
+ {
+  "i": 96,
+  "prompt": "IKEA 家具 4500",
+  "s": 7.3,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:housing:furniture"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 IKEA 家具 4500 TWD｜expenses:housing:furniture 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 IKEA 家具 4,500 TWD，分類為住房家具。"
+ },
+ {
+  "i": 97,
+  "prompt": "蝦皮購物 589 元",
+  "s": 8.2,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:shopping"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 蝦皮購物 589 TWD｜expenses:shopping 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 蝦皮購物 589 TWD，分類為 `expenses:shopping`。"
+ },
+ {
+  "i": 98,
+  "prompt": "momo 買洗衣精 399",
+  "s": 7.5,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:shopping"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 momo 買洗衣精 399 TWD｜expenses:shopping 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 momo 買洗衣精，399 TWD，分類為一般購物。"
+ },
+ {
+  "i": 99,
+  "prompt": "UNIQLO 衣服 990 元",
+  "s": 11.7,
+  "confirm": null,
+  "path": "fast",
+  "tools": [
+   "finance_finish"
+  ],
+  "ok": true,
+  "extra": 0,
+  "injected": false,
+  "adopted": false,
+  "clean": true,
+  "accounts": [
+   "expenses:shopping"
+  ],
+  "reply": "已記帳 1 筆： ・2026-10-09 UNIQLO 衣服 990 TWD｜expenses:shopping 要撤銷請說「撤銷」。  || 已記帳：2026-10-09 UNIQLO 衣服 990 TWD，分類為「一般購物」。"
+ }
+]

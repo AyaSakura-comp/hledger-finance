@@ -1058,13 +1058,68 @@ def normalize_query_terms(terms: Sequence[str]) -> list[str]:
             lowered = prefix.lower()
             if lowered in JOURNAL_TAGS:
                 body = f"tag:{lowered}={value}"
+            elif lowered in {"currency", "commodity"}:
+                body = f"cur:{value}"
             elif lowered not in QUERY_PREFIXES and lowered not in ACCOUNT_FAMILIES:
                 raise ValueError(
                     f"Unknown query term {term!r}; use acct:, desc:, amt:, date:, cur:, "
                     "tag:NAME=VALUE (e.g. tag:kind=expense) or an account name"
                 )
+        elif body and not body.isascii():
+            # A bare word like "吃飯" would be an account regex matching
+            # nothing; map known words to accounts, else search descriptions.
+            mapped = account_pattern(body)
+            body = mapped if mapped != body else f"desc:{body}"
         normalized.append(("not:" if negated else "") + body)
     return normalized
+
+
+# Models and users name accounts in words ("現金", "美金帳戶"); hledger would
+# treat them as an account regex that matches nothing and report zero.
+ACCOUNT_WORDS = (
+    (("美金", "美元"), "usd"), (("台幣", "新台幣"), "twd"), (("日幣", "日圓", "日元"), "jpy"),
+    (("現金",), "assets:cash"), (("銀行",), "assets:bank"), (("存款",), "assets:deposits"),
+    (("信用卡",), "liabilities"), (("美股", "股票", "投資"), "assets:investments"),
+    (("餐", "吃飯", "飲食"), "expenses:food"), (("交通",), "expenses:transport"),
+    (("薪水", "薪資"), "income:salary"), (("收入",), "income"), (("支出", "花費"), "expenses"),
+)
+
+
+def account_pattern(text: str) -> str:
+    if text.isascii():
+        return text
+    for words, pattern in ACCOUNT_WORDS:
+        if any(word in text for word in words):
+            return pattern
+    return text
+
+
+def check_account_patterns(journal: Path, patterns: Sequence[str]) -> None:
+    """An account filter matching no account is a mistake, not a zero balance."""
+    if not patterns:
+        return
+    result = _run(["hledger", "-f", str(journal), "accounts"], capture=True)
+    known = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    for pattern in patterns:
+        try:
+            matched = any(re.search(pattern, account, re.I) for account in known)
+        except re.error:
+            matched = any(pattern.lower() in account.lower() for account in known)
+        if not matched:
+            raise ValueError(
+                f"No account matches {pattern!r}; use one of: " + ", ".join(known[:120])
+            )
+
+
+def last_entries(output: str, report: str, output_format: str | None, limit: int) -> str:
+    if output_format == "json":
+        return json.dumps(json.loads(output or "[]")[-limit:], ensure_ascii=False, indent=2) + "\n"
+    if report == "transactions" and output_format in (None, "txt"):
+        blocks = [b for b in re.split(r"\n\s*\n", output.strip()) if b.strip()]
+        return "\n\n".join(blocks[-limit:]) + "\n"
+    lines = output.rstrip("\n").splitlines()
+    head = lines[:1] if output_format == "csv" else []
+    return "\n".join(head + lines[len(head):][-limit:]) + "\n"
 
 
 def build_hledger_query(
@@ -3224,6 +3279,49 @@ def _reject_dirty_journal(journal: Path) -> None:
         raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
 
 
+def _adopt_external_journal_edits(journal: Path) -> None:
+    """Commit valid hand edits to the journal on their own before a write.
+
+    Edits made outside the finance commands (an editor, another agent) used to
+    block every later write until someone cleaned Git up by hand. A valid
+    journal is committed as its own "Adopt" commit, so the next action's commit
+    stays separate and undo still reverts only the newest action. Invalid
+    journals and staged changes to other files are still refused.
+    """
+    book_dir = journal.parent
+    if not (book_dir / ".git").exists():
+        return
+    relative = str(journal.relative_to(book_dir))
+    if subprocess.run(
+        ["git", "-C", str(book_dir), "ls-files", "--error-unmatch", "--", relative],
+        check=False,
+        capture_output=True,
+    ).returncode:
+        return
+    staged = subprocess.run(
+        ["git", "-C", str(book_dir), "diff", "--cached", "--name-only"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    unstaged = subprocess.run(
+        ["git", "-C", str(book_dir), "diff", "--quiet", "--", relative],
+        check=False,
+        capture_output=True,
+    ).returncode
+    if any(name != relative for name in staged) or (not staged and unstaged != 1):
+        return
+    try:
+        _validate_journal_text(journal.read_text(encoding="utf-8"), base_dir=book_dir)
+    except Exception as error:
+        raise ValueError(
+            "The journal was edited outside the finance tools and is not valid hledger; "
+            f"fix or revert that edit first ({str(error).strip().splitlines()[0] if str(error).strip() else 'invalid journal'})"
+        ) from error
+    _git_commit(book_dir, "Adopt external journal edits", paths=[journal])
+    print("Adopted external journal edits as a separate commit.", file=sys.stderr)
+
+
 def _reject_staged_changes(book_dir: Path) -> None:
     if not (book_dir / ".git").exists():
         return
@@ -3268,6 +3366,7 @@ def _replace_validated_and_commit_locked(
     source_snapshots: dict[str, _JournalSourceSnapshot] | None = None,
 ) -> None:
     _require_regular_journal(journal)
+    _adopt_external_journal_edits(journal)
     _reject_staged_changes(journal.parent)
     _reject_dirty_journal(journal)
     existing = journal.read_text(encoding="utf-8")
@@ -3920,12 +4019,16 @@ def command_import_csv(args: argparse.Namespace) -> int:
 def command_query(args: argparse.Namespace) -> int:
     _ensure_journal(args.journal)
     begin, end = _resolve_period(args)
+    accounts = [account_pattern(a) for a in args.account]
+    check_account_patterns(args.journal, accounts)
+    if args.limit and end is None:
+        end = date.today() + timedelta(days=1)  # "latest" means up to today, not scheduled future rows
     command = build_hledger_query(
         journal=args.journal,
         report=args.report,
         begin=begin,
         end=end,
-        accounts=args.account,
+        accounts=accounts,
         descriptions=args.description,
         tags=args.tag,
         raw_terms=args.where,
@@ -3934,6 +4037,15 @@ def command_query(args: argparse.Namespace) -> int:
     )
     if args.show_command:
         print(shlex.join(command), file=sys.stderr)
+    if args.limit:
+        if args.report not in {"transactions", "register"}:
+            raise ValueError("limit applies to transactions/register reports only")
+        result = _run(command, capture=True)
+        if result.returncode:
+            print(result.stderr, file=sys.stderr)
+            return result.returncode
+        sys.stdout.write(last_entries(result.stdout, args.report, args.format, args.limit))
+        return 0
     return subprocess.run(command, check=False).returncode
 
 
@@ -4151,6 +4263,7 @@ def command_undo(args: argparse.Namespace) -> int:
 def _command_undo_locked(args: argparse.Namespace) -> int:
     _require_regular_journal(args.journal)
     book_dir = args.journal.parent
+    _adopt_external_journal_edits(args.journal)
     _reject_staged_changes(book_dir)
     _reject_dirty_journal(args.journal)
     if not (book_dir / ".git").exists():
@@ -4333,6 +4446,7 @@ def build_parser() -> argparse.ArgumentParser:
     query_parser.add_argument("--where", action="append", default=[], help="Raw hledger query term")
     query_parser.add_argument("--interval", choices=["daily", "weekly", "monthly", "quarterly", "yearly"])
     query_parser.add_argument("--format", choices=["txt", "csv", "json", "html"])
+    query_parser.add_argument("--limit", type=int, help="Only the most recent N transactions/register rows")
     query_parser.add_argument("--show-command", action="store_true")
     query_parser.set_defaults(func=command_query)
 

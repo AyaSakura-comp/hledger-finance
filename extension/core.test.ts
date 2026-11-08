@@ -67,6 +67,11 @@ test('gateway envelopes and history are stripped; spoken amounts become digits',
  const piweb='[PiWeb cross-harness context]\n{"role":"user","text":"【記帳】1500 午餐"}\nEnd of context.]\n\n[Web user: web]\n確認 4a4912e3-871d-47a4-ae28-d65391509209';
  assert.equal(userMessage(piweb),'確認 4a4912e3-871d-47a4-ae28-d65391509209');
  assert.equal(userMessage('[Web user: web]\n今天天氣如何'),'今天天氣如何');
+assert.equal(userMessage('[Web user: web]\n<quoted_selection>\n確認\n</quoted_selection>'),'確認');
+assert.equal(userMessage('<quoted_selection>\n取消\n</quoted_selection>'),'取消');
+assert.equal(userMessage('[Web user: web]\n<quoted_selection>\n確認」\n</quoted_selection>'),'確認');
+assert.equal(userMessage('<quoted_selection>\n午餐120元\n</quoted_selection>'),'<quoted_selection>\n午餐120元\n</quoted_selection>');
+assert.equal(userMessage('<quoted_selection>\n確認\n</quoted_selection>\n\n為什麼'),'<quoted_selection>\n確認\n</quoted_selection>\n\n為什麼');
  assert.equal(userMessage('[Discord user: aya]\n\n[Voice message transcription: voice.ogg]\n剛剛在全聯買東西 花了四百六十塊'),'剛剛在全聯買東西 花了460 元');
  assert.equal(userMessage('幫我記帳 午餐一百五十元'),'幫我記帳 午餐150 元');
  assert.equal(userMessage('收到薪水五萬元、十二塊、兩千零五元、一萬兩千三百元'),'收到薪水50000 元、12 元、2005 元、12300 元');
@@ -100,6 +105,7 @@ test('unconverted Zhuyin is never accepted as an item name',async()=>{
  const {parseEntries,userMessage}=await import('./core.ts');
  assert.equal(parseEntries(userMessage('【記帳】300 ㄒㄧ ㄔㄜˋ'),'2026-10-04'),null);
  assert.equal(parseEntries('300 洗車','2026-10-04')?.[0].description,'洗車');
+ assert.equal(parseEntries('今天：早餐 60、捷運 30、午餐 130','2026-10-04')?.length,3);
 });
 test('explicit 【記帳】 allows an amount glued to the item; repeat requests are recognised',async()=>{
  const {parseEntries,isRepeatRequest}=await import('./core.ts');
@@ -107,4 +113,10 @@ test('explicit 【記帳】 allows an amount glued to the item; repeat requests 
  assert.equal(parseEntries('1015高鐵','2026-10-05'),null);
  for(const t of ['多一筆','再一筆','再記一次','一樣再一筆'])assert.ok(isRepeatRequest(t),t);
  for(const t of ['多一筆午餐 120','再一筆是什麼'])assert.equal(isRepeatRequest(t),false,t);
+});
+test('a fallback guess is not offered to the model as a suggestion',async()=>{
+ const {FinanceBatch}=await import('./core.ts');
+ const backend=async(args:string[])=>JSON.stringify({binding:false,suggestion:{account:'expenses:uncategorized',source:'fallback'},categories:[{account:'expenses:food:dining'},{account:'expenses:uncategorized'}]});
+ const b=new FinanceBatch(backend as any,async()=>['expenses:food:dining']);await b.prepare('滷肉飯 50 元','2026-10-09','t');
+ assert.equal((b.context() as any).entries[0].suggestion,undefined);
 });

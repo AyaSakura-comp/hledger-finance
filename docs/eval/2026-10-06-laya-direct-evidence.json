@@ -1,0 +1,2623 @@
+{
+  "root": "/tmp/finance-laya-eval-A2Gr77",
+  "today": "2026-10-06",
+  "service": "existing laya.service CPU /v1/systemone",
+  "minimum": 0.55,
+  "margin": 0.15,
+  "expenses": [
+    {
+      "id": 1,
+      "prompt": "早餐 65 元",
+      "state": "uncertain",
+      "seconds": 0.24866024100000003,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 2,
+      "prompt": "午餐 120",
+      "state": "uncertain",
+      "seconds": 0.2349581780000001,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 3,
+      "prompt": "晚餐 280 元",
+      "state": "uncertain",
+      "seconds": 0.248191648,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 4,
+      "prompt": "便當 95",
+      "state": "released",
+      "seconds": 0.04648826000000008,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 5,
+      "prompt": "滷肉飯 50 元",
+      "state": "uncertain",
+      "seconds": 0.27101855,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 6,
+      "prompt": "珍奶 60",
+      "state": "uncertain",
+      "seconds": 0.25415808100000026,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 7,
+      "prompt": "咖啡 85 元",
+      "state": "uncertain",
+      "seconds": 0.04999620700000014,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 8,
+      "prompt": "星巴克 155",
+      "state": "released",
+      "seconds": 0.048735959999999974,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 9,
+      "prompt": "全家 89 元",
+      "state": "uncertain",
+      "seconds": 0.269671069,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 10,
+      "prompt": "7-11 買早餐 75",
+      "state": "uncertain",
+      "seconds": 0.26091759900000033,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 11,
+      "prompt": "全聯 680 元",
+      "state": "uncertain",
+      "seconds": 0.05315189899999996,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 12,
+      "prompt": "家樂福 1250",
+      "state": "uncertain",
+      "seconds": 0.05483767799999987,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 13,
+      "prompt": "好市多 3420 元",
+      "state": "uncertain",
+      "seconds": 0.05366473600000018,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 14,
+      "prompt": "屈臣氏面膜 299 元",
+      "state": "uncertain",
+      "seconds": 0.050735621000000265,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 15,
+      "prompt": "康是美 188",
+      "state": "uncertain",
+      "seconds": 0.05119763200000034,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 16,
+      "prompt": "加油 1200 元",
+      "state": "uncertain",
+      "seconds": 0.04895917999999983,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 17,
+      "prompt": "停車費 60",
+      "state": "uncertain",
+      "seconds": 0.049823221000000105,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 18,
+      "prompt": "ETC 扣款 45 元",
+      "state": "uncertain",
+      "seconds": 0.23636327900000015,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 19,
+      "prompt": "悠遊卡加值 500",
+      "state": "uncertain",
+      "seconds": 0.051044593000000534,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 20,
+      "prompt": "捷運 35 元",
+      "state": "uncertain",
+      "seconds": 0.04302950699999929,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 21,
+      "prompt": "高鐵 1490 元",
+      "state": "uncertain",
+      "seconds": 0.048359670000000736,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 22,
+      "prompt": "台鐵 375",
+      "state": "released",
+      "seconds": 0.049861872999999834,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 23,
+      "prompt": "Uber 230 元",
+      "state": "released",
+      "seconds": 0.1753438210000004,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 24,
+      "prompt": "計程車 185",
+      "state": "uncertain",
+      "seconds": 0.04083150099999966,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 25,
+      "prompt": "YouBike 10 元",
+      "state": "released",
+      "seconds": 0.1655795450000005,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 26,
+      "prompt": "房租 15000 元",
+      "state": "uncertain",
+      "seconds": 0.04975361900000007,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 27,
+      "prompt": "電費 1380",
+      "state": "done",
+      "seconds": 0.18901134999999977,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 28,
+      "prompt": "水費 420 元",
+      "state": "done",
+      "seconds": 0.19769812299999923,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 29,
+      "prompt": "瓦斯費 650",
+      "state": "done",
+      "seconds": 0.19348056799999994,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 30,
+      "prompt": "中華電信月租 599 元",
+      "state": "done",
+      "seconds": 0.5588574159999998,
+      "correct": true,
+      "within10": true,
+      "transactions": 1,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 31,
+      "prompt": "Netflix 390",
+      "state": "released",
+      "seconds": 0.16412361899999997,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 32,
+      "prompt": "Spotify 149 元",
+      "state": "released",
+      "seconds": 0.16691133699999955,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 33,
+      "prompt": "ChatGPT 650 元",
+      "state": "released",
+      "seconds": 0.18161670200000027,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 34,
+      "prompt": "健身房月費 1299",
+      "state": "done",
+      "seconds": 0.19849557800000003,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 35,
+      "prompt": "看牙醫 150 元",
+      "state": "uncertain",
+      "seconds": 0.050733948000000056,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 36,
+      "prompt": "掛號費 200",
+      "state": "done",
+      "seconds": 0.2074153099999994,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 37,
+      "prompt": "藥局買感冒藥 320 元",
+      "state": "uncertain",
+      "seconds": 0.2559956459999994,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 38,
+      "prompt": "剪頭髮 500",
+      "state": "uncertain",
+      "seconds": 0.05334828900000139,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 39,
+      "prompt": "洗衣店 180 元",
+      "state": "uncertain",
+      "seconds": 0.041078116000000595,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 40,
+      "prompt": "洗車 300 元",
+      "state": "uncertain",
+      "seconds": 0.22978271700000005,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 41,
+      "prompt": "300元洗車",
+      "state": "uncertain",
+      "seconds": 0.23254084899999908,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 42,
+      "prompt": "1500 午餐",
+      "state": "uncertain",
+      "seconds": 0.2550787569999993,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 43,
+      "prompt": "【記帳】60元貓罐頭",
+      "state": "uncertain",
+      "seconds": 0.2238796739999998,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 44,
+      "prompt": "【記帳】4499元 衣服",
+      "state": "uncertain",
+      "seconds": 0.23582702699999936,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 45,
+      "prompt": "【記帳】3000日圓 GPT",
+      "state": "uncertain",
+      "seconds": 0.21963947600000028,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 46,
+      "prompt": "昨天晚餐 350 元",
+      "state": "uncertain",
+      "seconds": 0.25261411800000133,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 47,
+      "prompt": "前天看電影 330",
+      "state": "uncertain",
+      "seconds": 0.21780748999999924,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 48,
+      "prompt": "今天午餐 140 元",
+      "state": "uncertain",
+      "seconds": 0.27912421899999934,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 49,
+      "prompt": "2026-10-01 書 420 元",
+      "state": "uncertain",
+      "seconds": 0.2676150319999997,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 50,
+      "prompt": "威力彩 100 元",
+      "state": "uncertain",
+      "seconds": 0.05945672000000013,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 51,
+      "prompt": "午餐 120、飲料 50",
+      "state": "uncertain",
+      "seconds": 0.3316106120000004,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 52,
+      "prompt": "早餐 60、午餐 110、晚餐 200",
+      "state": "uncertain",
+      "seconds": 0.4501737699999994,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 53,
+      "prompt": "咖啡95元、YouBike15元",
+      "state": "uncertain",
+      "seconds": 0.3358067759999994,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 54,
+      "prompt": "便當 90，飲料 45",
+      "state": "uncertain",
+      "seconds": 0.3440202270000009,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 55,
+      "prompt": "記帳 168元 飲料\n75 停車費\n453 披薩",
+      "state": "uncertain",
+      "seconds": 0.424581091,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 56,
+      "prompt": "剛剛搭計程車花了 230",
+      "state": "done",
+      "seconds": 0.5612085210000005,
+      "correct": true,
+      "within10": true,
+      "transactions": 1,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 57,
+      "prompt": "在全聯買東西花了 460",
+      "state": "uncertain",
+      "seconds": 0.04203533100000095,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 58,
+      "prompt": "買衛生紙花了 299 元",
+      "state": "uncertain",
+      "seconds": 0.23130119100000046,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 59,
+      "prompt": "今天吃火鍋花了 860",
+      "state": "done",
+      "seconds": 0.577059346,
+      "correct": true,
+      "within10": true,
+      "transactions": 1,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 60,
+      "prompt": "繳了保險費 3600",
+      "state": "uncertain",
+      "seconds": 0.049653060000000554,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 61,
+      "prompt": "幫我記帳 午餐一百五十元",
+      "state": "uncertain",
+      "seconds": 0.2471172310000002,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 62,
+      "prompt": "剛剛在全聯買東西 花了四百六十塊",
+      "state": "uncertain",
+      "seconds": 0.25433572599999754,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 63,
+      "prompt": "記一下 咖啡八十五元",
+      "state": "uncertain",
+      "seconds": 0.23520061499999792,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 64,
+      "prompt": "早餐五十塊",
+      "state": "uncertain",
+      "seconds": 0.2182874060000031,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 65,
+      "prompt": "加油一千二百元",
+      "state": "uncertain",
+      "seconds": 0.24606129000000146,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 66,
+      "prompt": "今天收到薪水 50000 元",
+      "state": "uncertain",
+      "seconds": 0.11000135000000227,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 67,
+      "prompt": "年終獎金 80000 元入帳",
+      "state": "released",
+      "seconds": 0.04837072099999932,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 68,
+      "prompt": "發票中獎 200 元",
+      "state": "uncertain",
+      "seconds": 0.12958781199999794,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 69,
+      "prompt": "朋友還我 500 元",
+      "state": "uncertain",
+      "seconds": 0.13089055900000313,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 70,
+      "prompt": "賣二手書收入 350",
+      "state": "uncertain",
+      "seconds": 0.04943966700000237,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 71,
+      "prompt": "午餐 1200 JPY",
+      "state": "uncertain",
+      "seconds": 0.25131007899999896,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 72,
+      "prompt": "東京地鐵 210 日圓",
+      "state": "uncertain",
+      "seconds": 0.0494097299999994,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 73,
+      "prompt": "美國 Amazon 買書 25 USD",
+      "state": "uncertain",
+      "seconds": 0.04571118399999977,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 74,
+      "prompt": "在日本買藥妝 3500 日幣",
+      "state": "done",
+      "seconds": 0.5884597780000004,
+      "correct": true,
+      "within10": true,
+      "transactions": 1,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 75,
+      "prompt": "訂閱 iCloud 0.99 USD",
+      "state": "released",
+      "seconds": 0.18066354499999943,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 76,
+      "prompt": "用信用卡買耳機 2990 元",
+      "state": "uncertain",
+      "seconds": 0.2332450570000001,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 77,
+      "prompt": "LINE Pay 付午餐 130",
+      "state": "done",
+      "seconds": 0.5650176350000001,
+      "correct": true,
+      "within10": true,
+      "transactions": 1,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 78,
+      "prompt": "街口付飲料 55 元",
+      "state": "done",
+      "seconds": 0.5948036930000017,
+      "correct": true,
+      "within10": true,
+      "transactions": 1,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 79,
+      "prompt": "現金付早餐 45",
+      "state": "uncertain",
+      "seconds": 0.05177606299999752,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 80,
+      "prompt": "刷卡繳電話費 799 元",
+      "state": "uncertain",
+      "seconds": 0.05657403300000078,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 81,
+      "prompt": "紅包 1200 元",
+      "state": "done",
+      "seconds": 0.5893045810000003,
+      "correct": true,
+      "within10": true,
+      "transactions": 1,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 82,
+      "prompt": "拜拜金紙 300",
+      "state": "uncertain",
+      "seconds": 0.04094602700000178,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 83,
+      "prompt": "捐款 1000 元",
+      "state": "released",
+      "seconds": 0.055895101999998587,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 84,
+      "prompt": "買禮物給媽媽 1680",
+      "state": "uncertain",
+      "seconds": 0.040561232000000016,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 85,
+      "prompt": "同事生日禮金 500 元",
+      "state": "uncertain",
+      "seconds": 0.042698261999998065,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 86,
+      "prompt": "貓砂 450 元",
+      "state": "uncertain",
+      "seconds": 0.04016329100000075,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 87,
+      "prompt": "寵物美容 900",
+      "state": "uncertain",
+      "seconds": 0.040304497000000994,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 88,
+      "prompt": "繳學費 25000 元",
+      "state": "uncertain",
+      "seconds": 0.04264237700000013,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 89,
+      "prompt": "補習費 8000",
+      "state": "done",
+      "seconds": 0.1900137289999984,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 90,
+      "prompt": "買教科書 650 元",
+      "state": "uncertain",
+      "seconds": 0.23654355900000154,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 91,
+      "prompt": "夜市雞排 85",
+      "state": "uncertain",
+      "seconds": 0.04650868899999841,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 92,
+      "prompt": "鹹酥雞 150 元",
+      "state": "uncertain",
+      "seconds": 0.04242685999999958,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 93,
+      "prompt": "豆花 45",
+      "state": "uncertain",
+      "seconds": 0.040749746999998025,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 94,
+      "prompt": "滷味 120 元",
+      "state": "uncertain",
+      "seconds": 0.24745456700000068,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 95,
+      "prompt": "剉冰 70",
+      "state": "uncertain",
+      "seconds": 0.0517274010000001,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 96,
+      "prompt": "迪化街年貨 2300 元",
+      "state": "uncertain",
+      "seconds": 0.04096401100000003,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 97,
+      "prompt": "IKEA 家具 4500",
+      "state": "uncertain",
+      "seconds": 0.2560729820000015,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 98,
+      "prompt": "蝦皮購物 589 元",
+      "state": "done",
+      "seconds": 0.5766089670000001,
+      "correct": true,
+      "within10": true,
+      "transactions": 1,
+      "parserSupported": true,
+      "calls": 2
+    },
+    {
+      "id": 99,
+      "prompt": "momo 買洗衣精 399",
+      "state": "uncertain",
+      "seconds": 0.040778680999999775,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 1
+    },
+    {
+      "id": 100,
+      "prompt": "UNIQLO 衣服 990 元",
+      "state": "uncertain",
+      "seconds": 0.2222898549999991,
+      "correct": false,
+      "within10": true,
+      "transactions": 0,
+      "parserSupported": true,
+      "calls": 2
+    }
+  ],
+  "categories": [
+    {
+      "id": 1,
+      "prompt": "雞排 85 元",
+      "accepted": [
+        "expenses:food:snacks",
+        "expenses:food:dining"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09462068200000066,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 2,
+      "prompt": "珍珠奶茶 65 元",
+      "accepted": [
+        "expenses:food:drinks"
+      ],
+      "binding": false,
+      "chosen": "expenses:shopping",
+      "status": "uncertain",
+      "seconds": 0.09764860299999782,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 3,
+      "prompt": "滷肉飯 45 元",
+      "accepted": [
+        "expenses:food:dining"
+      ],
+      "binding": false,
+      "chosen": "expenses:shopping",
+      "status": "uncertain",
+      "seconds": 0.10894956699999966,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 4,
+      "prompt": "蚵仔煎 80 元",
+      "accepted": [
+        "expenses:food:dining",
+        "expenses:food:snacks"
+      ],
+      "binding": false,
+      "chosen": "expenses:pets",
+      "status": "uncertain",
+      "seconds": 0.108800857000002,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 5,
+      "prompt": "臭豆腐 70 元",
+      "accepted": [
+        "expenses:food:snacks",
+        "expenses:food:dining"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.12374397999999928,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 6,
+      "prompt": "刈包 60 元",
+      "accepted": [
+        "expenses:food:snacks",
+        "expenses:food:dining"
+      ],
+      "binding": false,
+      "chosen": "expenses:gifts",
+      "status": "uncertain",
+      "seconds": 0.11619104499999958,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 7,
+      "prompt": "鹹酥雞 150 元",
+      "accepted": [
+        "expenses:food:snacks",
+        "expenses:food:dining"
+      ],
+      "binding": false,
+      "chosen": "expenses:shopping",
+      "status": "uncertain",
+      "seconds": 0.09962566100000185,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 8,
+      "prompt": "大腸包小腸 65 元",
+      "accepted": [
+        "expenses:food:snacks",
+        "expenses:food:dining"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.10945852699999886,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 9,
+      "prompt": "鳳梨酥 350 元",
+      "accepted": [
+        "expenses:food:snacks",
+        "expenses:gifts"
+      ],
+      "binding": false,
+      "chosen": "expenses:shopping",
+      "status": "uncertain",
+      "seconds": 0.09643609600000128,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 10,
+      "prompt": "牛肉麵 180 元",
+      "accepted": [
+        "expenses:food:dining"
+      ],
+      "binding": false,
+      "chosen": "expenses:food:dining",
+      "status": "uncertain",
+      "seconds": 0.10091602499999863,
+      "correct": false,
+      "top1Correct": true
+    },
+    {
+      "id": 11,
+      "prompt": "四神湯 50 元",
+      "accepted": [
+        "expenses:food:dining"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.13130816699999923,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 12,
+      "prompt": "愛玉 40 元",
+      "accepted": [
+        "expenses:food:snacks",
+        "expenses:food:drinks"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.10848757500000283,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 13,
+      "prompt": "蔥抓餅 45 元",
+      "accepted": [
+        "expenses:food:snacks",
+        "expenses:food:dining",
+        "expenses:food:breakfast"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09718633000000046,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 14,
+      "prompt": "燒餅油條 55 元",
+      "accepted": [
+        "expenses:food:dining",
+        "expenses:food:breakfast"
+      ],
+      "binding": false,
+      "chosen": "expenses:shopping",
+      "status": "uncertain",
+      "seconds": 0.09526213199999983,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 15,
+      "prompt": "米糕 50 元",
+      "accepted": [
+        "expenses:food:dining",
+        "expenses:food:snacks"
+      ],
+      "binding": false,
+      "chosen": "expenses:shopping",
+      "status": "uncertain",
+      "seconds": 0.09552422600000136,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 16,
+      "prompt": "肉圓 50 元",
+      "accepted": [
+        "expenses:food:dining",
+        "expenses:food:snacks"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09511082600000009,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 17,
+      "prompt": "潤餅 60 元",
+      "accepted": [
+        "expenses:food:dining",
+        "expenses:food:snacks"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09673026100000061,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 18,
+      "prompt": "麻辣燙 180 元",
+      "accepted": [
+        "expenses:food:dining"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.11605971700000009,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 19,
+      "prompt": "Gogoro 電池資費 499 元",
+      "accepted": [
+        "expenses:transport:driving",
+        "expenses:transport:vehicle",
+        "expenses:transport:fuel",
+        "expenses:subscriptions"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09865230499999962,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 20,
+      "prompt": "YouBike 15 元",
+      "accepted": [
+        "expenses:transport:transit"
+      ],
+      "binding": false,
+      "chosen": "expenses:transport:driving",
+      "status": "uncertain",
+      "seconds": 0.26000219300000027,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 21,
+      "prompt": "ETC 通行費 120 元",
+      "accepted": [
+        "expenses:transport:driving",
+        "expenses:transport:vehicle"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09645380899999872,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 22,
+      "prompt": "國光客運 150 元",
+      "accepted": [
+        "expenses:transport:transit"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.1065480979999993,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 23,
+      "prompt": "路邊停車費 40 元",
+      "accepted": [
+        "expenses:transport:driving",
+        "expenses:transport:parking"
+      ],
+      "binding": false,
+      "chosen": "expenses:transport:driving",
+      "status": "uncertain",
+      "seconds": 0.10625097699999969,
+      "correct": false,
+      "top1Correct": true
+    },
+    {
+      "id": 24,
+      "prompt": "機車強制險 566 元",
+      "accepted": [
+        "expenses:insurance"
+      ],
+      "binding": false,
+      "chosen": "expenses:insurance",
+      "status": "uncertain",
+      "seconds": 0.095514948,
+      "correct": false,
+      "top1Correct": true
+    },
+    {
+      "id": 25,
+      "prompt": "機車驗車 200 元",
+      "accepted": [
+        "expenses:transport:driving",
+        "expenses:transport:vehicle"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.0954953310000019,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 26,
+      "prompt": "健保費 826 元",
+      "accepted": [
+        "expenses:insurance",
+        "expenses:health"
+      ],
+      "binding": false,
+      "chosen": "expenses:insurance",
+      "status": "uncertain",
+      "seconds": 0.09666580899999826,
+      "correct": false,
+      "top1Correct": true
+    },
+    {
+      "id": 27,
+      "prompt": "勞保自付額 1100 元",
+      "accepted": [
+        "expenses:insurance"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.11922726200000033,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 28,
+      "prompt": "台電電費 1200 元",
+      "accepted": [
+        "expenses:utilities"
+      ],
+      "binding": false,
+      "chosen": "expenses:utilities",
+      "status": "uncertain",
+      "seconds": 0.11296742499999891,
+      "correct": false,
+      "top1Correct": true
+    },
+    {
+      "id": 29,
+      "prompt": "自來水費 300 元",
+      "accepted": [
+        "expenses:utilities"
+      ],
+      "binding": false,
+      "chosen": "expenses:utilities",
+      "status": "uncertain",
+      "seconds": 0.09606114900000103,
+      "correct": false,
+      "top1Correct": true
+    },
+    {
+      "id": 30,
+      "prompt": "第四台 550 元",
+      "accepted": [
+        "expenses:utilities",
+        "expenses:subscriptions",
+        "expenses:entertainment",
+        "expenses:entertainment:streaming"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09655463900000177,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 31,
+      "prompt": "中華電信 MOD 月租 199 元",
+      "accepted": [
+        "expenses:subscriptions",
+        "expenses:utilities",
+        "expenses:utilities:telecom",
+        "expenses:entertainment:streaming"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.10149473700000089,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 32,
+      "prompt": "寶雅買洗面乳 199 元",
+      "accepted": [
+        "expenses:personal-care",
+        "expenses:personal:grooming",
+        "expenses:shopping:beauty"
+      ],
+      "binding": false,
+      "chosen": "expenses:shopping",
+      "status": "match",
+      "seconds": 0.12750534400000105,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 33,
+      "prompt": "屈臣氏面膜 299 元",
+      "accepted": [
+        "expenses:personal-care",
+        "expenses:personal:grooming",
+        "expenses:shopping:beauty"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09989408800000092,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 34,
+      "prompt": "康是美買感冒藥 180 元",
+      "accepted": [
+        "expenses:health",
+        "expenses:health:medicine"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09972800400000414,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 35,
+      "prompt": "大創 160 元",
+      "accepted": [
+        "expenses:shopping"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.10918032200000016,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 36,
+      "prompt": "燦坤買吹風機 1290 元",
+      "accepted": [
+        "expenses:shopping",
+        "expenses:shopping:electronics",
+        "expenses:housing:appliance"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.10071071799999481,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 37,
+      "prompt": "全聯鮮乳 95 元",
+      "accepted": [
+        "expenses:food:groceries",
+        "expenses:shopping:groceries"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09858032000000094,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 38,
+      "prompt": "小北百貨 230 元",
+      "accepted": [
+        "expenses:shopping",
+        "expenses:housing:supplies"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09762910600000033,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 39,
+      "prompt": "誠品買書 450 元",
+      "accepted": [
+        "expenses:education",
+        "expenses:education:books"
+      ],
+      "binding": false,
+      "chosen": "expenses:shopping",
+      "status": "uncertain",
+      "seconds": 0.0988402700000006,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 40,
+      "prompt": "威力彩 100 元",
+      "accepted": [
+        "expenses:entertainment:lottery"
+      ],
+      "binding": false,
+      "chosen": "expenses:utilities",
+      "status": "uncertain",
+      "seconds": 0.09755674899999577,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 41,
+      "prompt": "夾娃娃機 50 元",
+      "accepted": [
+        "expenses:entertainment"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09915500299999985,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 42,
+      "prompt": "好樂迪 600 元",
+      "accepted": [
+        "expenses:entertainment"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09882601299999806,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 43,
+      "prompt": "威秀影城 330 元",
+      "accepted": [
+        "expenses:entertainment"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.09788545999999769,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 44,
+      "prompt": "安親班 6000 元",
+      "accepted": [
+        "expenses:education"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.10029923199999757,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 45,
+      "prompt": "媽祖廟香油錢 200 元",
+      "accepted": [
+        "expenses:donations"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.13123093099999825,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 46,
+      "prompt": "白包 1200 元",
+      "accepted": [
+        "expenses:gifts"
+      ],
+      "binding": false,
+      "chosen": "expenses:gifts",
+      "status": "uncertain",
+      "seconds": 0.1021310169999997,
+      "correct": false,
+      "top1Correct": true
+    },
+    {
+      "id": 47,
+      "prompt": "安太歲光明燈 600 元",
+      "accepted": [
+        "expenses:donations"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.0987703279999987,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 48,
+      "prompt": "診所掛號費 150 元",
+      "accepted": [
+        "expenses:health",
+        "expenses:health:clinic"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.13064904399999797,
+      "correct": false,
+      "top1Correct": false
+    },
+    {
+      "id": 49,
+      "prompt": "補習班學費 8000 元",
+      "accepted": [
+        "expenses:education",
+        "expenses:education:course"
+      ],
+      "binding": false,
+      "chosen": "expenses:education",
+      "status": "match",
+      "seconds": 0.11403993799999444,
+      "correct": true,
+      "top1Correct": true
+    },
+    {
+      "id": 50,
+      "prompt": "蝦皮店到店運費 38 元",
+      "accepted": [
+        "expenses:shopping",
+        "expenses:fees"
+      ],
+      "binding": false,
+      "chosen": "expenses:uncategorized",
+      "status": "uncertain",
+      "seconds": 0.10081134699999529,
+      "correct": false,
+      "top1Correct": false
+    }
+  ],
+  "intent": [
+    {
+      "prompt": "午餐120元",
+      "expected": "record",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.8165,
+        "margin": 0.6921,
+        "status": "match",
+        "probabilities": {
+          "record": 0.8165,
+          "query": 0.0426,
+          "change": 0.0165,
+          "none": 0.1244
+        }
+      },
+      "error": "",
+      "seconds": 0.04176025300000037,
+      "correct": true
+    },
+    {
+      "prompt": "收到薪水50000元",
+      "expected": "record",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.4316,
+        "margin": 0.04159999999999997,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.39,
+          "query": 0.1572,
+          "change": 0.0212,
+          "none": 0.4316
+        }
+      },
+      "error": "",
+      "seconds": 0.044322045000000795,
+      "correct": false
+    },
+    {
+      "prompt": "昨天加油1200",
+      "expected": "record",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.8209,
+        "margin": 0.6648999999999999,
+        "status": "match",
+        "probabilities": {
+          "record": 0.156,
+          "query": 0.0126,
+          "change": 0.0105,
+          "none": 0.8209
+        }
+      },
+      "error": "",
+      "seconds": 0.051135114999997316,
+      "correct": false
+    },
+    {
+      "prompt": "午餐120、飲料50",
+      "expected": "record",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.9113,
+        "margin": 0.8388,
+        "status": "match",
+        "probabilities": {
+          "record": 0.9113,
+          "query": 0.0112,
+          "change": 0.0049,
+          "none": 0.0725
+        }
+      },
+      "error": "",
+      "seconds": 0.04758589999999822,
+      "correct": true
+    },
+    {
+      "prompt": "貓砂450元",
+      "expected": "record",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.4256,
+        "margin": 0.16749999999999998,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.2581,
+          "query": 0.0913,
+          "change": 0.2251,
+          "none": 0.4256
+        }
+      },
+      "error": "",
+      "seconds": 0.04352409900000202,
+      "correct": false
+    },
+    {
+      "prompt": "這個月花了多少",
+      "expected": "query",
+      "decision": {
+        "choice": "query",
+        "confidence": 0.4657,
+        "margin": 0.1331,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.1997,
+          "query": 0.4657,
+          "change": 0.002,
+          "none": 0.3326
+        }
+      },
+      "error": "",
+      "seconds": 0.03882192100000247,
+      "correct": false
+    },
+    {
+      "prompt": "我的現金還剩多少",
+      "expected": "query",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.9001,
+        "margin": 0.8221,
+        "status": "match",
+        "probabilities": {
+          "record": 0.9001,
+          "query": 0.078,
+          "change": 0.001,
+          "none": 0.0209
+        }
+      },
+      "error": "",
+      "seconds": 0.047256299000000584,
+      "correct": false
+    },
+    {
+      "prompt": "列出我的交易明細",
+      "expected": "query",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.5276,
+        "margin": 0.22129999999999994,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.5276,
+          "query": 0.1456,
+          "change": 0.0204,
+          "none": 0.3063
+        }
+      },
+      "error": "",
+      "seconds": 0.039947332999996435,
+      "correct": false
+    },
+    {
+      "prompt": "幫我畫本月支出圖",
+      "expected": "query",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.931,
+        "margin": 0.8765000000000001,
+        "status": "match",
+        "probabilities": {
+          "record": 0.931,
+          "query": 0.0117,
+          "change": 0.0028,
+          "none": 0.0545
+        }
+      },
+      "error": "",
+      "seconds": 0.040681388000004516,
+      "correct": false
+    },
+    {
+      "prompt": "查看我的帳本餘額",
+      "expected": "query",
+      "decision": {
+        "choice": "query",
+        "confidence": 0.9819,
+        "margin": 0.9717,
+        "status": "match",
+        "probabilities": {
+          "record": 0.0063,
+          "query": 0.9819,
+          "change": 0.0017,
+          "none": 0.0102
+        }
+      },
+      "error": "",
+      "seconds": 0.03989694800000143,
+      "correct": true
+    },
+    {
+      "prompt": "今天我花了多少錢",
+      "expected": "query",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.5807,
+        "margin": 0.19640000000000002,
+        "status": "match",
+        "probabilities": {
+          "record": 0.5807,
+          "query": 0.3843,
+          "change": 0.0012,
+          "none": 0.0338
+        }
+      },
+      "error": "",
+      "seconds": 0.050773282000001925,
+      "correct": false
+    },
+    {
+      "prompt": "上個月我的收入多少",
+      "expected": "query",
+      "decision": {
+        "choice": "query",
+        "confidence": 0.4499,
+        "margin": 0.17110000000000003,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.2642,
+          "query": 0.4499,
+          "change": 0.0072,
+          "none": 0.2788
+        }
+      },
+      "error": "",
+      "seconds": 0.03900590899999952,
+      "correct": false
+    },
+    {
+      "prompt": "刪除昨天午餐那筆",
+      "expected": "change",
+      "decision": {
+        "choice": "change",
+        "confidence": 0.7763,
+        "margin": 0.6224,
+        "status": "match",
+        "probabilities": {
+          "record": 0.1539,
+          "query": 0.0042,
+          "change": 0.7763,
+          "none": 0.0656
+        }
+      },
+      "error": "",
+      "seconds": 0.04485640200000489,
+      "correct": true
+    },
+    {
+      "prompt": "撤銷上一筆記帳",
+      "expected": "change",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.4283,
+        "margin": 0.08290000000000003,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.3454,
+          "query": 0.0795,
+          "change": 0.1468,
+          "none": 0.4283
+        }
+      },
+      "error": "",
+      "seconds": 0.04958837700000004,
+      "correct": false
+    },
+    {
+      "prompt": "把午餐那筆改成150元",
+      "expected": "change",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.5276,
+        "margin": 0.24709999999999993,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.5276,
+          "query": 0.0432,
+          "change": 0.1487,
+          "none": 0.2805
+        }
+      },
+      "error": "",
+      "seconds": 0.043593882000001034,
+      "correct": false
+    },
+    {
+      "prompt": "備份整份帳本",
+      "expected": "change",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.4857,
+        "margin": 0.11220000000000002,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.3735,
+          "query": 0.1108,
+          "change": 0.03,
+          "none": 0.4857
+        }
+      },
+      "error": "",
+      "seconds": 0.039755341999996745,
+      "correct": false
+    },
+    {
+      "prompt": "以後公司午餐都歸工作費",
+      "expected": "change",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.5441,
+        "margin": 0.19680000000000003,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.3473,
+          "query": 0.028,
+          "change": 0.0805,
+          "none": 0.5441
+        }
+      },
+      "error": "",
+      "seconds": 0.04722162400000525,
+      "correct": false
+    },
+    {
+      "prompt": "你好",
+      "expected": "none",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.6748,
+        "margin": 0.43899999999999995,
+        "status": "match",
+        "probabilities": {
+          "record": 0.2358,
+          "query": 0.0488,
+          "change": 0.0406,
+          "none": 0.6748
+        }
+      },
+      "error": "",
+      "seconds": 0.04183181799999875,
+      "correct": true
+    },
+    {
+      "prompt": "幫我修改finance extension API",
+      "expected": "none",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.5127,
+        "margin": 0.3319000000000001,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.1274,
+          "query": 0.1808,
+          "change": 0.1792,
+          "none": 0.5127
+        }
+      },
+      "error": "",
+      "seconds": 0.17182867100000293,
+      "correct": false
+    },
+    {
+      "prompt": "測試記帳模型效能",
+      "expected": "none",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.7074,
+        "margin": 0.5319,
+        "status": "match",
+        "probabilities": {
+          "record": 0.1755,
+          "query": 0.0896,
+          "change": 0.0275,
+          "none": 0.7074
+        }
+      },
+      "error": "",
+      "seconds": 0.04056814399999712,
+      "correct": true
+    },
+    {
+      "prompt": "咖啡價格120元值得嗎",
+      "expected": "none",
+      "decision": {
+        "choice": "query",
+        "confidence": 0.3726,
+        "margin": 0.04299999999999998,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.2708,
+          "query": 0.3726,
+          "change": 0.027,
+          "none": 0.3296
+        }
+      },
+      "error": "",
+      "seconds": 0.05076660000000265,
+      "correct": false
+    },
+    {
+      "prompt": "午餐120不要記帳",
+      "expected": "none",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.6342,
+        "margin": 0.3061,
+        "status": "match",
+        "probabilities": {
+          "record": 0.6342,
+          "query": 0.0133,
+          "change": 0.0244,
+          "none": 0.3281
+        }
+      },
+      "error": "",
+      "seconds": 0.04063386800000444,
+      "correct": false
+    },
+    {
+      "prompt": "如果每天午餐120，一個月多少",
+      "expected": "none",
+      "decision": {
+        "choice": "query",
+        "confidence": 0.4837,
+        "margin": 0.08700000000000002,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.1157,
+          "query": 0.4837,
+          "change": 0.0039,
+          "none": 0.3967
+        }
+      },
+      "error": "",
+      "seconds": 0.049084256000001915,
+      "correct": false
+    },
+    {
+      "prompt": "舉例：午餐120元",
+      "expected": "none",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.4694,
+        "margin": 0.07079999999999997,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.3986,
+          "query": 0.1138,
+          "change": 0.0183,
+          "none": 0.4694
+        }
+      },
+      "error": "",
+      "seconds": 0.04832456400000228,
+      "correct": false
+    },
+    {
+      "prompt": "請翻譯「午餐120元」",
+      "expected": "none",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.5726,
+        "margin": 0.1755,
+        "status": "match",
+        "probabilities": {
+          "record": 0.3971,
+          "query": 0.0184,
+          "change": 0.0119,
+          "none": 0.5726
+        }
+      },
+      "error": "",
+      "seconds": 0.03962475500000437,
+      "correct": true
+    },
+    {
+      "prompt": "請寫函式解析午餐120元",
+      "expected": "none",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.5938,
+        "margin": 0.35109999999999997,
+        "status": "match",
+        "probabilities": {
+          "record": 0.5938,
+          "query": 0.2427,
+          "change": 0.0062,
+          "none": 0.1573
+        }
+      },
+      "error": "",
+      "seconds": 0.040635460999998034,
+      "correct": false
+    },
+    {
+      "prompt": "伯克希爾持有多少美國公債",
+      "expected": "none",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.5038,
+        "margin": 0.029600000000000015,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.4742,
+          "query": 0.0136,
+          "change": 0.0084,
+          "none": 0.5038
+        }
+      },
+      "error": "",
+      "seconds": 0.040933422999994945,
+      "correct": false
+    },
+    {
+      "prompt": "信用卡回饋哪張好",
+      "expected": "none",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.3995,
+        "margin": 0.11870000000000003,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.2808,
+          "query": 0.2482,
+          "change": 0.0715,
+          "none": 0.3995
+        }
+      },
+      "error": "",
+      "seconds": 0.039288030000003346,
+      "correct": false
+    },
+    {
+      "prompt": "我要查Gemini訂閱到期",
+      "expected": "none",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.748,
+        "margin": 0.583,
+        "status": "match",
+        "probabilities": {
+          "record": 0.165,
+          "query": 0.0719,
+          "change": 0.0151,
+          "none": 0.748
+        }
+      },
+      "error": "",
+      "seconds": 0.03942323500000202,
+      "correct": true
+    },
+    {
+      "prompt": "我要產生房租15000的測試資料",
+      "expected": "none",
+      "decision": {
+        "choice": "query",
+        "confidence": 0.5533,
+        "margin": 0.3197,
+        "status": "match",
+        "probabilities": {
+          "record": 0.1813,
+          "query": 0.5533,
+          "change": 0.0318,
+          "none": 0.2336
+        }
+      },
+      "error": "",
+      "seconds": 0.051896169999999985,
+      "correct": false
+    },
+    {
+      "prompt": "<quoted_selection>午餐120元</quoted_selection>\n這段模型回答錯在哪？",
+      "expected": "none",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.9196,
+        "margin": 0.8632,
+        "status": "match",
+        "probabilities": {
+          "record": 0.0564,
+          "query": 0.022,
+          "change": 0.0021,
+          "none": 0.9196
+        }
+      },
+      "error": "",
+      "seconds": 0.04071054300000105,
+      "correct": true
+    },
+    {
+      "prompt": "[Web user: web]\n> 咖啡95元\n分析這段程式",
+      "expected": "none",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.494,
+        "margin": 0.09439999999999998,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.3996,
+          "query": 0.0875,
+          "change": 0.0188,
+          "none": 0.494
+        }
+      },
+      "error": "",
+      "seconds": 0.05166333099999611,
+      "correct": false
+    },
+    {
+      "prompt": "[Web user: web]\n[Binary attachment: receipt.jpg]\n這是哪款陶瓷杯？",
+      "expected": "none",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.4968,
+        "margin": 0.2592,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.4968,
+          "query": 0.2376,
+          "change": 0.0629,
+          "none": 0.2028
+        }
+      },
+      "error": "",
+      "seconds": 0.044795516999998654,
+      "correct": false
+    },
+    {
+      "prompt": "請重啟API server",
+      "expected": "none",
+      "decision": {
+        "choice": "change",
+        "confidence": 0.6224,
+        "margin": 0.41169999999999995,
+        "status": "match",
+        "probabilities": {
+          "record": 0.1454,
+          "query": 0.0216,
+          "change": 0.6224,
+          "none": 0.2107
+        }
+      },
+      "error": "",
+      "seconds": 0.049789285999999267,
+      "correct": false
+    },
+    {
+      "prompt": "下個月打算買耳機2990元",
+      "expected": "none",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.6455,
+        "margin": 0.39749999999999996,
+        "status": "match",
+        "probabilities": {
+          "record": 0.6455,
+          "query": 0.0824,
+          "change": 0.0241,
+          "none": 0.248
+        }
+      },
+      "error": "",
+      "seconds": 0.050690936999999395,
+      "correct": false
+    },
+    {
+      "prompt": "朋友薪水50000，幫他算稅",
+      "expected": "none",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.6994,
+        "margin": 0.5418000000000001,
+        "status": "match",
+        "probabilities": {
+          "record": 0.1576,
+          "query": 0.1197,
+          "change": 0.0234,
+          "none": 0.6994
+        }
+      },
+      "error": "",
+      "seconds": 0.05308778699999675,
+      "correct": true
+    },
+    {
+      "prompt": "午餐一百五十元",
+      "expected": "record",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.7725,
+        "margin": 0.612,
+        "status": "match",
+        "probabilities": {
+          "record": 0.7725,
+          "query": 0.0537,
+          "change": 0.0133,
+          "none": 0.1605
+        }
+      },
+      "error": "",
+      "seconds": 0.045173440999999,
+      "correct": true
+    },
+    {
+      "prompt": "記一下YouBike15元",
+      "expected": "record",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.9277,
+        "margin": 0.8845,
+        "status": "match",
+        "probabilities": {
+          "record": 0.9277,
+          "query": 0.0244,
+          "change": 0.0047,
+          "none": 0.0432
+        }
+      },
+      "error": "",
+      "seconds": 0.05248118299999623,
+      "correct": true
+    },
+    {
+      "prompt": "我要記帳，收據金額看不清可能150或1500",
+      "expected": "clarify",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.7045,
+        "margin": 0.4902,
+        "status": "match",
+        "probabilities": {
+          "record": 0.7045,
+          "query": 0.0753,
+          "change": 0.006,
+          "none": 0.2143
+        }
+      },
+      "error": "",
+      "seconds": 0.042536948000000845,
+      "correct": false
+    },
+    {
+      "prompt": "多一筆",
+      "expected": "clarify",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.6473,
+        "margin": 0.4128,
+        "status": "match",
+        "probabilities": {
+          "record": 0.2345,
+          "query": 0.0547,
+          "change": 0.0635,
+          "none": 0.6473
+        }
+      },
+      "error": "",
+      "seconds": 0.0459570789999998,
+      "correct": false
+    },
+    {
+      "prompt": "再一筆一樣的",
+      "expected": "clarify",
+      "decision": {
+        "choice": "none",
+        "confidence": 0.5091,
+        "margin": 0.10049999999999998,
+        "status": "uncertain",
+        "probabilities": {
+          "record": 0.4086,
+          "query": 0.0703,
+          "change": 0.012,
+          "none": 0.5091
+        }
+      },
+      "error": "",
+      "seconds": 0.05380683300000237,
+      "correct": false
+    },
+    {
+      "prompt": "重複了",
+      "expected": "clarify",
+      "decision": {
+        "choice": "record",
+        "confidence": 0.6386,
+        "margin": 0.32019999999999993,
+        "status": "match",
+        "probabilities": {
+          "record": 0.6386,
+          "query": 0.0343,
+          "change": 0.0086,
+          "none": 0.3184
+        }
+      },
+      "error": "",
+      "seconds": 0.05040995599999587,
+      "correct": false
+    }
+  ],
+  "productionUnchanged": true,
+  "summary": {
+    "expenseCorrect": 8,
+    "expenseCount": 100,
+    "within10": 100,
+    "correctWithin10": 8,
+    "medianSeconds": 0.18531402600000002,
+    "maxSeconds": 0.5948036930000017,
+    "categoryCorrect": 1,
+    "categoryTop1": 8,
+    "categoryCount": 50,
+    "intentCorrect": 12,
+    "intentCount": 42,
+    "falseFinance": [
+      "午餐120不要記帳",
+      "請寫函式解析午餐120元",
+      "我要產生房租15000的測試資料",
+      "請重啟API server",
+      "下個月打算買耳機2990元"
+    ],
+    "expenseUnexpectedWrites": []
+  }
+}

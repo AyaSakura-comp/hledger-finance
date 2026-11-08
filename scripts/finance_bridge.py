@@ -102,6 +102,8 @@ def command_args(operation, data):
         else:
             values = value if isinstance(value, list) else [value]
             for item in values:
+                if isinstance(item, int) and not isinstance(item, bool):
+                    item = str(item)
                 if not isinstance(item, str) or len(item) > 20000 or any(ord(c) < 32 for c in item):
                     raise ValueError('Option must be a bounded string')
                 if key == 'where' and item.startswith('-'):
@@ -241,6 +243,7 @@ def undo_action(journal, mode):
         return {'code': 0, 'stdout': latest.replace('\x00', ' '), 'stderr': 'Undo preview; nothing written.'}
     if not subject.startswith('Update finance rules:'):
         return invoke(journal, ['undo'])
+    f._adopt_external_journal_edits(journal)
     f._reject_staged_changes(journal.parent)
     f._reject_dirty_journal(journal)
     if subprocess.run(['git', '-C', str(journal.parent), 'diff', '--quiet', '--', *RULE_FILES.values()]).returncode:
