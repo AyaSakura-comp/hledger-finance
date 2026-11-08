@@ -2,10 +2,14 @@
   "name": "hledger-finance-pi",
   "version": "0.1.0",
   "private": true,
-  "description": "Experimental guarded finance state machines for pi (fast single expense + previewed workflows); not production-ready",
-  "keywords": ["pi-package"],
+  "description": "hledger personal finance tools for pi: record, query, delete, undo, and the full finance.py CLI — writes directly, Git-backed undo",
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
-    "extensions": ["./extension/channel.ts"]
+    "extensions": [
+      "./extension/finance.ts"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

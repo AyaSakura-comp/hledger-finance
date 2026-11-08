@@ -2,8 +2,21 @@
   "name": "pi-finance-fsm",
   "private": true,
   "type": "module",
-  "pi": {"extensions": ["./index.ts"]},
-  "scripts": {"test": "tsx --test *.test.ts", "bench": "tsx bench.ts"},
-  "peerDependencies": {"@earendil-works/pi-coding-agent": "*", "typebox": "*", "@earendil-works/pi-ai": "*"},
-  "devDependencies": {"tsx": "^4.0.0", "typescript": "^5.0.0"}
+  "pi": {
+    "extensions": [
+      "./finance.ts"
+    ]
+  },
+  "scripts": {
+    "test": "tsx --test *.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*",
+    "@earendil-works/pi-ai": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
 }

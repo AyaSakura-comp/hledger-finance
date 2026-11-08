@@ -4,15 +4,11 @@ A complete Pi/Hermes agent skill and deterministic `hfin` CLI for personal finan
 
 The repository contains the whole installable skill: CLI source, agent instructions, accounting references, visualization QA, and tests. Personal journals are **not** stored in this repository.
 
-## Guarded Pi extension
+## Pi extension
 
-The root Pi package loads [`extension/channel.ts`](extension/channel.ts): the guarded bookkeeping/workflow FSM, with the same seven public tools and finance-owned system prefix on PiWeb and Piscord. Trusted launcher configuration `PI_FINANCE_HOST=piweb` enables the wallet; `piscord`, missing and unknown values deny access without reading a balance or pretending to record anything. See [channel setup, authorization and limitations](extension/CHANNEL-WALLET.md). Installation is opt-in; it does not change the ledger, model, thinking settings or KV manager. Start acceptance tests with an initialized disposable `PI_FINANCE_JOURNAL`.
+The root Pi package loads [`extension/finance.ts`](extension/finance.ts): five plain tools that act on the ledger directly. There is no state machine, preview token or shell guard. Every write is validated by `hledger check` and committed to Git, so `finance_undo` reverts any mistake, and valid hand edits to the journal are committed automatically on the next write. See [extension/README.md](extension/README.md).
 
-Transaction queries, account balances and income/expense statistics now return **Markdown tables**, not raw ledger dumps. Normal transaction tables hide internal `source`, `inferred:*` and `import-id` comments; dates, accounts, signed monetary strings and currencies remain backend-owned. Money columns precede long account names for phone readability. Explicit JSON/CSV/HTML formats remain fenced raw output; unrecognized text falls back to a code block rather than silently discarding facts. The CLI and ledger are unchanged. See [formatting verification](docs/eval/2026-10-09-markdown-results.md).
-
-This execution policy is **not an OS sandbox** against arbitrary same-UID shell code. Legacy direct-factory instructions remain in [`extension/README.md`](extension/README.md); experimental Laya work has not passed acceptance and is not part of the deployed entrypoint.
-
-Scope, known failures, and measured results: [FSM screening](docs/eval/2026-10-03-pi-qwen-fsm.md), [full Qwen evaluation](docs/eval/2026-10-03-pi-qwen-full.md), and [conversion plan](docs/plans/2026-10-03-pi-finance-state-machine.md).
+The previous guarded FSM (channel wallet, fast path, `確認 <uuid>` confirmations, Laya experiments) is preserved in commit `b61b34e`.
 
 ## Repository layout
 
